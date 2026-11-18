@@ -6016,6 +6016,11 @@ class Dictation(QObject):
             with self.model_lock:
                 if not self.recording:
                     return                       # let go meanwhile: the final read is next
+                if len(audio) >= rate * 0.25 and not self.has_speech(audio, rate):
+                    # Noise only (as Windows): the speech model would "hear" a
+                    # word such as "Okay" in room noise turned up for reading,
+                    # and it would show on the card.
+                    return
                 stop = _preview_stop_switch()
                 self._live_stop = stop           # flipped when the key is let go
                 began = time.monotonic()
