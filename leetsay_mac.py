@@ -7019,6 +7019,23 @@ class Dictation(QObject):
         last = blocks[-1]
         return min(len(plain), last.b + last.size + (len(typed) - (last.a + last.size)))
 
+    REPEAT_MIN = 3               # words: a shorter echo can be meant ("no, no")
+
+    def _skip_repeat(self, words):
+        """How many of the first words of a new reading only repeat the end of
+        what was typed already. The context read along with a piece (the last
+        two seconds before it) sometimes comes back as part of the piece, and
+        a whole phrase was then typed twice. Three words or more, in the same
+        order, compared without capitals or punctuation (as Windows)."""
+        if len(words) < self.REPEAT_MIN:
+            return 0
+        tail = self._plain((self.lt_done + self.lt_pending).split())[-40:]
+        new = self._plain(words)
+        for n in range(min(len(new), len(tail)), self.REPEAT_MIN - 1, -1):
+            if new[:n] == tail[-n:]:
+                return n
+        return 0
+
     def _compose(self, words, before=None, piece_end=False):
         """The text to type for these new words. The last word's full stop (or
         comma) is held back until the next words show the sentence ended."""
@@ -7063,6 +7080,7 @@ class Dictation(QObject):
         words = clean_words(text.split())
         plain = self._plain(words)
         begin = self._after_typed(plain)
+        begin = max(begin, self._skip_repeat(words))       # earlier words read again
         self._show_typed(session, words[begin:])
         fresh = plain[begin:]
         agreed = 0
@@ -7088,6 +7106,7 @@ class Dictation(QObject):
             return
         words = clean_words(text.split())
         begin = self._after_typed(self._plain(words))
+        begin = max(begin, self._skip_repeat(words))       # earlier words read again
         self._queue_words(words[begin:], words[begin - 1] if begin else (before or None),
                           piece_end=True)
         self.lt_commit = max(self.lt_commit, end)
@@ -7154,6 +7173,8 @@ class Dictation(QObject):
         typed = self.lt_done
         words = words_of(text)               # a line break stays a word of its own
         begin = self._after_typed(self._plain(words)) if words else 0
+        if words:
+            begin = max(begin, self._skip_repeat(words))   # earlier words read again
         rest = self._compose(words[begin:], words[begin - 1] if begin
                              else (self._final_before or None))
         rest = self.lt_pending + rest
