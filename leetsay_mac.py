@@ -812,12 +812,21 @@ _ssl_context = None
 
 
 def mac_ssl_context():
-    """Checking github.com's certificate needs a list of trusted authorities.
-    The Python inside the app has none of its own, so macOS's own list is
-    used (read from the system keychain, nothing is changed)."""
+    """How github.com's certificate is checked: by macOS itself (truststore,
+    which asks macOS's own certificate check, as Safari does), so the
+    authorities this Mac trusts count, including one a company installs for
+    its security software (Netskope, Zscaler...). Certificate checking stays
+    on whatever happens. If that can't be used, Apple's built-in list of
+    authorities (read from the system keychain; nothing is changed)."""
     global _ssl_context
     if _ssl_context is None:
         import ssl
+        try:
+            import truststore
+            _ssl_context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            return _ssl_context
+        except Exception:
+            log.exception("macOS certificate check not available; Apple's built-in list used")
         pem = subprocess.run(
             ["/usr/bin/security", "find-certificate", "-a", "-p",
              "/System/Library/Keychains/SystemRootCertificates.keychain"],
@@ -4983,6 +4992,7 @@ class Dictation(QObject):
         self.download_failures = 0
         self.download_blocked = False
         self.download_stuck = False
+        self.download_cert = False           # GitHub's certificate wasn't trusted
         self.download_got = 0
         self.download_moved = time.monotonic()
         self.load_failed_at = None
@@ -5260,6 +5270,7 @@ class Dictation(QObject):
     DOWNLOADING = "Downloading the speech model"
     STUCK = "The download is not moving  \u00b7  click for help"
     BLOCKED = "The download seems blocked  \u00b7  click to try again"
+    BLOCKED_CERT = "The download seems blocked by a security check"
     NO_MODEL = "No speech model  \u00b7  click to download"
     GIVE_UP_AFTER = 3                            # failed attempts before stopping
     STUCK_AFTER = 20.0                           # seconds with nothing new arriving
@@ -5267,7 +5278,7 @@ class Dictation(QObject):
 
     def download_words(self):
         if self.download_blocked:
-            return self.BLOCKED
+            return self.BLOCKED_CERT if self.download_cert else self.BLOCKED
         if self.download_stuck:
             return self.STUCK
         total = model_total_bytes()
@@ -5317,7 +5328,7 @@ class Dictation(QObject):
         A right-click on the card tries again straight away."""
         self.notice_action = self.download_clicked     # stays clickable
         if self.download_blocked or self.download_stuck:
-            download_help(self.retry_download)
+            download_help(self.retry_download, cert=self.download_cert)
 
     def retry_download(self):
         if not self.downloading:
@@ -5344,6 +5355,11 @@ class Dictation(QObject):
             # A download attempt gave up. Another follows shortly, a few
             # times; then it stops (and the network shuts) until asked again.
             self.load_failed_at = time.monotonic()
+            said = (err or "").lower()
+            if "certificate verify failed" in said or "certificate is not trusted" in said:
+                # GitHub's certificate wasn't trusted: usually a security
+                # program or company network inspecting the connection.
+                self.download_cert = True
             self.download_failures += 1
             if self.download_failures >= self.GIVE_UP_AFTER:
                 self.download_blocked = True
@@ -7415,13 +7431,33 @@ STUCK_HELP = (
     "\u201cQuit {app}\u201d.")
 
 
-def download_help(retry=None):
+CERT_HELP = (
+    "{app} checks GitHub's certificate before it downloads anything. The answer "
+    "came with a certificate this Mac doesn't trust. That usually means a security "
+    "program or a company network is inspecting the connection (Netskope or Zscaler, "
+    "for example). {app} doesn't switch that check off.\n\n"
+    "What you can do:\n\n"
+    "1.  Click \u201cManual download\u201d and fetch the files with your web browser, "
+    "which your security program usually lets through. {app} checks every file "
+    "against its fingerprint before using it.\n\n"
+    "2.  Or ask whoever runs the security program to allow github.com, "
+    "release-assets.githubusercontent.com and objects.githubusercontent.com, then click "
+    "\u201cTry again\u201d.")
+
+
+def download_help(retry=None, cert=False):
     """What to do when the model's download has stopped moving or seems
-    blocked (as Windows' download_help). In front of every other window,
-    the setup window included."""
+    blocked (as Windows' download_help); with cert, when GitHub's certificate
+    wasn't trusted (a security program inspecting the connection). In front
+    of every other window, the setup window included."""
     buttons = (("Try again",) if retry else ()) + ("Manual download", "Close")
-    choice = dialog(f"{APP_TITLE}: download not moving", STUCK_HELP.format(app=APP_TITLE),
-                    buttons=buttons, headline="The download has stopped moving", width=460)
+    if cert:
+        choice = dialog(f"{APP_TITLE}: download blocked", CERT_HELP.format(app=APP_TITLE),
+                        buttons=buttons, headline="A security check blocked the download",
+                        width=460)
+    else:
+        choice = dialog(f"{APP_TITLE}: download not moving", STUCK_HELP.format(app=APP_TITLE),
+                        buttons=buttons, headline="The download has stopped moving", width=460)
     log.info("download help: %s", choice or "closed")
     if choice == "Try again" and retry is not None:
         retry()

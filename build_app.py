@@ -124,6 +124,7 @@ PACKAGES = [
     ("humanfriendly", "humanfriendly", "MIT", "used by coloredlogs"),
     ("sympy", "sympy", "BSD-3-Clause", "used by ONNX Runtime"),
     ("mpmath", "mpmath", "BSD-3-Clause", "used by sympy"),
+    ("truststore", "truststore", "MIT", "checks download certificates with macOS"),
 ]
 _LICENCE_FILE = re.compile(r"(LICEN[CS]E|COPYING|NOTICE|ThirdPartyNotices)", re.I)
 

@@ -102,8 +102,8 @@ except the items marked below, and only when you choose them.
 - The list of speakers and headphones (Settings › Audio › Sounds › Output),
   and the `.wav` files you choose there for your own start and finish sounds.
 - macOS's **Reduce motion** setting (with it on, the pop-up doesn't animate).
-- The list of trusted website certificates built into macOS, only while a
-  download you agreed to is running, to check that it really is github.com.
+- macOS's own certificate check, only while a download you agreed to is
+  running, to check that it really is github.com.
 - **Start at login** adds leetsay to your Login Items. It is switched on when
   you finish setup (as "Start with Windows" is ticked on Windows), never
   before; untick it in Settings › General and it is removed. **Setup and permissions** open pages of System Settings; the

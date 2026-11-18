@@ -66,6 +66,8 @@ file from Silero VAD's official release v6.2.3, with its licence.
   microphone.
 - [NumPy](https://numpy.org) (BSD-3-Clause, with the licences of its bundled
   parts): audio handling.
+- [truststore](https://github.com/sethmlarson/truststore) (MIT): checks the
+  model download's certificate with macOS's own certificate check.
 - [Python](https://www.python.org) (PSF License), inside the app, with the
   software built into it (OpenSSL under Apache-2.0, expat, libffi, zlib,
   mpdecimal, XZ, bzip2 and others).
