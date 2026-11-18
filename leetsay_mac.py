@@ -294,6 +294,7 @@ _ALL_MOD_BITS = 0x01 | 0x02 | 0x04 | 0x08 | 0x10 | 0x20 | 0x40 | 0x2000
 HOTKEY = "right_option"
 ADD_SPACE = True                     # a space after each dictation
 REMOVE_FILLERS = True                # leave out "um", "uh" and the like
+SPOKEN_BREAKS = True                 # saying "new line" / "new paragraph" starts one
 TEXTBOX_ONLY = True                  # type only into a text box (asks macOS)
 MAX_RECORD_SECONDS = 300             # a recording always stops after this long
 MIC_DEVICE = ""                      # microphone by name; "" = the Mac's default
@@ -500,6 +501,7 @@ def apply_config():
     globals()["PASTE_HOTKEY"] = (value if (value in HOTKEYS and value != HOTKEY
                                            and value != ACTION_HOTKEY) else "")
     for name, key in (("ADD_SPACE", "add_space"), ("REMOVE_FILLERS", "remove_fillers"),
+                      ("SPOKEN_BREAKS", "spoken_breaks"),
                       ("TEXTBOX_ONLY", "textbox_only"), ("RETURN_FOCUS", "return_focus"),
                       ("TYPE_TEXT", "type_text"), ("KEEP_LAST", "keep_last")):
         if isinstance(_config.get(key), bool):
@@ -658,13 +660,92 @@ def fix_times(words):
     return out
 
 
+_BREAK_WORDS = {"line": "\n", "paragraph": "\n\n"}
+
+
+def _bare(word):
+    return "".join(c for c in word.lower() if c.isalnum())
+
+
+def _stands_apart(words, first, last):
+    """Is words[first..last] said on its own, as a command: a pause or
+    punctuation before it (or the very start) and after it (or the very end),
+    and none inside it? So "a new line of credit" stays words. (As Windows.)"""
+    before = first == 0 or words[first - 1][-1:] in ".,!?;:"
+    after = last == len(words) - 1 or words[last][-1:] in ".,!?;:"
+    inside = all(w[-1:] not in ".,!?;:" for w in words[first:last])
+    return before and after and inside
+
+
+def spoken_breaks(words):
+    """ "new line" and "new paragraph" (any capitals, any punctuation the model
+    adds: "New line.") become a line break, as a word of its own ("\n" or
+    "\n\n"), when said on their own (see _stands_apart); the word after it
+    gets a capital. Off: left as words. (As Windows.)"""
+    if not SPOKEN_BREAKS:
+        return list(words)
+    out, i, capital = [], 0, False
+    while i < len(words):
+        word, bare = words[i], _bare(words[i])
+        if bare == "newline" and _stands_apart(words, i, i):
+            out.append("\n")
+            i += 1
+            capital = True
+            continue
+        if (bare == "new" and i + 1 < len(words)
+                and _bare(words[i + 1]) in _BREAK_WORDS
+                and _stands_apart(words, i, i + 1)):
+            out.append(_BREAK_WORDS[_bare(words[i + 1])])
+            i += 2
+            capital = True
+            continue
+        if capital and word[:1].isalpha():
+            word = word[:1].upper() + word[1:]
+        capital = False
+        out.append(word)
+        i += 1
+    return out
+
+
+_BREAK_SPACES = re.compile(r" *(\n+) *")
+
+
+def join_words(words):
+    """Words as text: spaces between them, none around a line break."""
+    return _BREAK_SPACES.sub(r"\1", " ".join(words))
+
+
+def words_of(text):
+    """Text back into words, a line break kept as a word of its own."""
+    return re.findall(r"\n+|[^\s]+", text)
+
+
 def clean_words(words):
-    """Filler words out, then times, then your word replacements."""
-    return replace_words(fix_times(drop_fillers(words)))
+    """Filler words out, then times, then spoken line breaks, then your word
+    replacements. (As Windows.)"""
+    return replace_words(spoken_breaks(fix_times(drop_fillers(words))))
 
 
 def clean_text(text):
-    return " ".join(clean_words(text.split()))
+    return join_words(clean_words(text.split()))
+
+
+# Apps where Shift+Return would run or send something: a spoken line break
+# is a space there. Terminals (Windows has the same rule for its consoles),
+# and Messages, where Shift+Return may send (a new line there is Option+Return).
+_NO_BREAK_APPS = {"com.apple.Terminal", "com.googlecode.iterm2", "dev.warp.Warp-Stable",
+                  "net.kovidgoyal.kitty", "io.alacritty", "org.alacritty",
+                  "com.github.wez.wezterm", "com.mitchellh.ghostty", "co.zeit.hyper",
+                  "com.apple.MobileSMS"}
+
+
+def no_breaks_in_terminal(text, bundle_id):
+    """In a terminal, Shift+Return works like Return and would run a
+    half-typed command: a spoken line break becomes a space there. (As
+    Windows; the Mac knows the app by its bundle id.)"""
+    if "\n" in text and bundle_id in _NO_BREAK_APPS:
+        return re.sub(r" *\n+ *", " ", text)
+    return text
 
 
 class _PrivateLog(logging.Filter):
@@ -1298,12 +1379,60 @@ class HotkeyWatch:
 # ---------------------------------------------------------------------------
 # Typing into the focused app (no clipboard)
 # ---------------------------------------------------------------------------
+def typing_steps(text):
+    """The text in typing order: runs of characters, and a ("break",) for each
+    spoken line break, typed as Shift+Return (never a plain Return, which
+    could send a message). A carriage return is left out. (As Windows.)"""
+    steps = []
+    for part in re.split(r"(\n)", text.replace("\r", "")):
+        if part == "\n":
+            steps.append(("break",))
+        elif part:
+            steps.append(("text", part))
+    return steps
+
+
+FLAG_SHIFT = 0x20000                     # kCGEventFlagMaskShift
+
+
+def _shift_return(src):
+    """One line break: Return with Shift (a new line in chat apps, not send)."""
+    for down in (True, False):
+        ev = CGEventCreateKeyboardEvent(src, 36, down)       # 36: Return
+        CGEventSetFlags(ev, FLAG_SHIFT)
+        CGEventSetIntegerValueField(ev, FIELD_USERDATA, OUR_MARK)
+        CGEventPost(0, ev)
+        CFRelease(ev)
+    time.sleep(0.004)
+
+
 def type_text(text):
-    """Types text as key presses. Returns None if done, or a reason if not."""
+    """Types text as key presses (a spoken line break as Shift+Return).
+    Returns None if done, or a reason if not."""
     if not can_control_keyboard():
         return "no_permission"
     if IsSecureEventInputEnabled():
         return "secure"
+    steps = typing_steps(text)
+    if len(steps) == 1 and steps[0][0] == "text":
+        return _type_chars(steps[0][1])
+    for step in steps:
+        if step[0] == "break":
+            src = CGEventSourceCreate(-1)
+            try:
+                _shift_return(src)
+            finally:
+                if src:
+                    CFRelease(src)
+        else:
+            problem = _type_chars(step[1])
+            if problem:
+                return problem
+    return None
+
+
+def _type_chars(text):
+    """Types characters (no line breaks) as Unicode key events."""
     src = CGEventSourceCreate(-1)          # private state: ignores held keys
     units = text.encode("utf-16-le")
     codes = [int.from_bytes(units[i:i + 2], "little") for i in range(0, len(units), 2)]
@@ -2084,6 +2213,21 @@ def front_app():
         return name, path
     except Exception:
         return "", ""
+
+
+def app_bundle_id(pid):
+    """The bundle id of the app with this process number ("" if unknown):
+    only to tell a terminal, where a spoken line break is a space. Never
+    written down."""
+    try:
+        app = objc(objc_class("NSRunningApplication"),
+                   "runningApplicationWithProcessIdentifier:", pid, argtypes=(ctypes.c_int,))
+        ident = objc(app, "bundleIdentifier") if app else None
+        if not ident:
+            return ""
+        return ctypes.string_at(objc(ident, "UTF8String")).decode("utf-8", "replace")
+    except Exception:
+        return ""
 
 
 def front_pid():
@@ -6047,7 +6191,7 @@ class Dictation(QObject):
                 self._live_rest_until = done + (done - began) * LIVE_REST
             # The same clean-up as the final text (fillers, times, your word
             # replacements), so the card shows what will be typed.
-            self.live_text.emit(session, " ".join(clean_words(text.split())))
+            self.live_text.emit(session, join_words(clean_words(text.split())))
         except Exception:
             pass                                 # also: stopped because the key was let go
         finally:
@@ -6243,10 +6387,11 @@ class Dictation(QObject):
             else:
                 marks = ""
             self.lt_held = marks
-        if self.lt_done or self.lt_pending or text:
+        if (self.lt_done or self.lt_pending or text) and \
+                not (text or self.lt_done + self.lt_pending).endswith("\n"):
             text += " "
         self.lt_all += self._plain(words)
-        return text + " ".join(words)
+        return join_words([text + " ".join(words)])
 
     def _queue_words(self, words, before=None, piece_end=False):
         text = self._compose(words, before, piece_end)
@@ -6271,6 +6416,8 @@ class Dictation(QObject):
             agreed += 1
         self.lt_prev = fresh
         upto = begin + min(agreed, len(fresh) - 1)       # never the newest word
+        if SPOKEN_BREAKS and upto > begin and _bare(words[upto - 1]) == "new":
+            upto -= 1                    # "new" waits: "new line" may be coming
         wait = max(0.0, self._live_rest_until - time.monotonic())
         QTimer.singleShot(int(wait * 1000) + 1, self._live_tick)
         if upto > begin:
@@ -6329,7 +6476,7 @@ class Dictation(QObject):
         self.lt_credit -= count
         part = self.lt_pending[:count]
         self._last_batch = time.monotonic()
-        problem = type_text(part)
+        problem = type_text(no_breaks_in_terminal(part, app_bundle_id(self.target_pid)))
         self._last_batch = time.monotonic()
         if problem is None:
             self.lt_done += part
@@ -6349,7 +6496,7 @@ class Dictation(QObject):
         log.info("type as you speak: %d bits typed while speaking, %d waits for the "
                  "app or a text box, %d refused", *self.lt_counts)
         typed = self.lt_done
-        words = text.split()
+        words = words_of(text)               # a line break stays a word of its own
         begin = self._after_typed(self._plain(words)) if words else 0
         rest = self._compose(words[begin:], words[begin - 1] if begin
                              else (self._final_before or None))
@@ -6413,7 +6560,7 @@ class Dictation(QObject):
                             self.result.emit(seq, "", what == "quiet")
                             return
                     text, self._final_before = self._timed_read(levelled, skip)
-                text = " ".join(clean_words(text.split()))
+                text = join_words(clean_words(text.split()))
             except Exception:
                 log.exception("recognition failed")
                 text = ""
@@ -6614,6 +6761,8 @@ class Dictation(QObject):
             after_key = ""               # never Return into a page or a list
         if remember:
             self.remember((kept + text).strip())
+        # In a terminal, a spoken line break would run the command: a space.
+        text = no_breaks_in_terminal(text, app_bundle_id(front_pid()))
         if text and not TYPE_TEXT:
             self._paste(text, after_key)
             return
@@ -7148,6 +7297,7 @@ for _key in ("add_space", "always_show", "pill_over_fullscreen", "accent_outline
              "show_popup", "show_timer", "show_waveform", "sounds", "tray_live", "wide_card",
              "live_preview", "type_text", "keep_last", "check_app_updates", "live_type",
              "remove_fillers", "textbox_only", "screen_glow_flow", "pointer_hint",
+             "spoken_breaks",
              "hold_to_talk"):
     _PORTABLE_CHECKS[_key] = lambda v: isinstance(v, bool)
 
@@ -7882,6 +8032,14 @@ class SettingsWindow(QtWidgets.QDialog):
                    "eyes often are.")
         check("Remove filler words", REMOVE_FILLERS, option("REMOVE_FILLERS", "remove_fillers"),
               hint="Leaves out um, uh and erm.")
+        check("Say \"new line\" for a line break", SPOKEN_BREAKS,
+              option("SPOKEN_BREAKS", "spoken_breaks"),
+              tip="On by default. Saying \"new line\" starts a new line, and \"new "
+                  "paragraph\" leaves an empty line between. Typed as Shift+Return, which "
+                  "starts a new line in most chat apps instead of sending. In a terminal it "
+                  "is a space instead (there it would run the command); in Messages too, "
+                  "where Shift+Return can send.",
+              hint="Typed as Shift+Return, not Return.")
         check("Add a space after each dictation", ADD_SPACE, option("ADD_SPACE", "add_space"),
               hint="So two dictations in a row don't run together.")
         check("Stay in the app I started in", RETURN_FOCUS,
