@@ -6032,7 +6032,7 @@ class Dictation(QObject):
             with self.model_lock:
                 if not self.recording:
                     return                       # let go meanwhile: the final read is next
-                if len(audio) >= rate * 0.25 and not self.has_speech(audio, rate):
+                if not self._speech_in(audio, rate):
                     # Noise only (as Windows): the speech model would "hear" a
                     # word such as "Okay" in room noise turned up for reading,
                     # and it would show on the card.
@@ -6162,6 +6162,8 @@ class Dictation(QObject):
         try:
             audio = leveled(audio)
             with self.model_lock:
+                if not self._speech_in(audio[int(skip * SAMPLE_RATE):]):
+                    return                       # the new part is noise only: nothing to type
                 began = time.monotonic()
                 text, before = self._timed_read(audio, skip)
                 done = time.monotonic()
@@ -6177,6 +6179,10 @@ class Dictation(QObject):
         try:
             audio = leveled(audio)
             with self.model_lock:
+                if not self._speech_in(audio[int(skip * SAMPLE_RATE):]):
+                    # A piece of noise only: done with it, nothing typed.
+                    self.live_piece.emit(session, "", end, start, "")
+                    return
                 began = time.monotonic()
                 text, before = self._timed_read(audio, skip)
                 done = time.monotonic()
@@ -6335,7 +6341,7 @@ class Dictation(QObject):
             if problem == "secure":
                 self.overlay.box_missing = "Password field: nothing will be typed"
 
-    def _lt_finish(self, text):
+    def _lt_finish(self, text, quiet=False):
         """You let go: type what is left, after what was typed already."""
         self.lt_active = False
         self.lt_pacer.stop()
@@ -6350,7 +6356,10 @@ class Dictation(QObject):
         rest = self.lt_pending + rest
         self._lt_forget()
         if not rest.strip() and not typed:
-            self.overlay.show_message("Didn't catch that", ms=1400)
+            if quiet:
+                self.overlay.show_message("Can't hear you. Check the mic", ms=3000)
+            else:
+                self.overlay.show_message("Didn't catch that", ms=1400)
             return
         after_key = ACTION_KEY if (self.do_action and ACTION_KEY) else AFTER_KEY
         if rest.strip():
@@ -6388,10 +6397,22 @@ class Dictation(QObject):
             return
         if skip is not None:
             # The rest of a typed-as-you-speak dictation, read with its
-            # context: only the words after the context are new.
+            # context: only the words after the context are new. Noise alone
+            # after the last pause must not become a made-up "Okay" (see
+            # speech_decision; nothing is dropped without a message).
             try:
+                levelled = leveled(audio)
                 with self.model_lock:
-                    text, self._final_before = self._timed_read(leveled(audio), skip)
+                    rest = levelled[int(skip * rate):]
+                    if not self._speech_in(rest, rate):
+                        what = speech_decision(False, float(getattr(self.recorder, "peak", 1.0)),
+                                               len(rest) / float(rate))
+                        if what != "read":
+                            log.info("type as you speak: nothing more after the last pause (%s)",
+                                     what)
+                            self.result.emit(seq, "", what == "quiet")
+                            return
+                    text, self._final_before = self._timed_read(levelled, skip)
                 text = " ".join(clean_words(text.split()))
             except Exception:
                 log.exception("recognition failed")
@@ -6399,8 +6420,8 @@ class Dictation(QObject):
             self.result.emit(seq, text, False)
             return
         t0 = time.perf_counter()
-        found = self.has_speech(audio, rate)
-        peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+        peak = float(np.max(np.abs(audio))) if audio.size else 0.0   # the microphone's own level
+        found = self.has_speech(leveled(audio), rate)                # quiet speech turned up first
         decision = speech_decision(found, peak, len(audio) / rate)
         # No words: what the speech check saw (to explain a stray "Yeah").
         log.info("speech check: %s (voice detector %s, loudest %.3f, %.1fs)", decision,
@@ -6424,6 +6445,15 @@ class Dictation(QObject):
         log.info("read %.1fs of audio in %.2fs (%d characters)",
                  len(audio) / rate, time.perf_counter() - t0, len(text))
         self.result.emit(seq, text, quiet)
+
+    def _speech_in(self, audio, rate=SAMPLE_RATE):
+        """Is there speech in this (levelled) audio? Detection only (as Windows
+        _speech_in). True when it can't be told (no detector), so nothing is
+        held back for that; under 0.25 s counts as none. Call with model_lock
+        held: the detector is shared with the readings."""
+        if self.vad is None or len(audio) < rate * 0.25:
+            return self.vad is None
+        return self.has_speech(audio, rate)
 
     def has_speech(self, audio, rate):
         """True if the speech detector finds any speech (or is not available)."""
@@ -6449,7 +6479,7 @@ class Dictation(QObject):
             self.notice("Speech model not found", ms=3000)
             return
         if self.lt_active:
-            self._lt_finish(text)
+            self._lt_finish(text, quiet)
             return
         if not text:
             # Whenever nothing is typed, the pop-up says why.
