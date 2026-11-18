@@ -6760,7 +6760,13 @@ class Dictation(QObject):
             # Typing as you speak: only the piece since the last pause is left
             # to read, with a little of what came before.
             whole, rest = audio, audio[self.lt_commit:]
-            if len(rest) < rate * 0.3 or not holds_speech(rest, whole, rate):
+            # Words already seen in this last piece: it is read whatever the
+            # noise checks say (quiet last words were dropped as noise).
+            self._final_heard = bool(self.lt_prev or self.lt_seg_words)
+            if not self._final_heard and (len(rest) < rate * 0.3
+                                          or not holds_speech(rest, whole, rate)):
+                log.info("type as you speak: the end (%.1f s) held no speech; nothing more "
+                         "was typed", len(rest) / float(rate))
                 self.overlay.dismiss()
                 QTimer.singleShot(0, lambda: self._lt_finish(""))
                 return
@@ -6926,9 +6932,10 @@ class Dictation(QObject):
         session = self.live_session
         if cut:
             self.live_busy = True
+            heard = bool(self.lt_prev or self.lt_seg_words)   # words seen in it already
             threading.Thread(target=self._live_piece_run,
                              args=(audio[:lead + cut], self.lt_commit + cut, session,
-                                   self.lt_commit, lead / float(SAMPLE_RATE)),
+                                   self.lt_commit, lead / float(SAMPLE_RATE), heard),
                              daemon=True).start()
             return
         total = start + len(audio)
@@ -6977,11 +6984,13 @@ class Dictation(QObject):
         finally:
             self.live_busy = False
 
-    def _live_piece_run(self, audio, end, session, start, skip):
+    def _live_piece_run(self, audio, end, session, start, skip, heard=False):
         try:
             audio = leveled(audio)
             with self.model_lock:
-                if not self._speech_in(audio[int(skip * SAMPLE_RATE):]):
+                # Skipped as noise only when no words were heard in it at all
+                # (quiet words were dropped as noise).
+                if not heard and not self._speech_in(audio[int(skip * SAMPLE_RATE):]):
                     # A piece of noise only: done with it, nothing typed.
                     self.live_piece.emit(session, "", end, start, "")
                     return
@@ -7257,7 +7266,7 @@ class Dictation(QObject):
                 levelled = leveled(audio)
                 with self.model_lock:
                     rest = levelled[int(skip * rate):]
-                    if not self._speech_in(rest, rate):
+                    if not getattr(self, "_final_heard", False) and not self._speech_in(rest, rate):
                         what = speech_decision(False, float(getattr(self.recorder, "peak", 1.0)),
                                                len(rest) / float(rate))
                         if what != "read":
