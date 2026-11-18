@@ -392,7 +392,9 @@ BOTTOM_MARGIN = 36                   # gap between the pill and the Dock
 EDGE_GAP = 8                         # the pop-up never comes closer to a screen edge
 LIVE_EVERY_MS = 250                  # the live words refresh this often at most
 LIVE_REST = 1.0 if (os.cpu_count() or 4) <= 8 else 0.25
-LIVE_WINDOW_SECONDS = 10             # recent audio re-read for the live words, per line
+LIVE_WINDOW_SECONDS = 4              # recent audio re-read for the live words, per line
+                                     # (was 10: each pass took ~1.5 s, so the card
+                                     # updated only every 2-3.5 s and fell behind)
 
 _config = {}
 _config_lock = threading.RLock()
@@ -5864,6 +5866,19 @@ class Dictation(QObject):
         self.reading_since = time.monotonic()    # until its text is in (see on_press)
         threading.Thread(target=self._transcribe, args=(self.seq, audio, rate, quiet, skip),
                          daemon=True).start()
+        if not self.lt_active:
+            seq = self.seq
+            QTimer.singleShot(700, lambda: self._still_working(seq))
+
+    WORKING = "Transcribing\u2026"
+
+    def _still_working(self, seq):
+        """A longer dictation takes a moment to turn into text: after 0.7 s the
+        card becomes a small "Transcribing…" pill until the text is typed, so
+        it doesn't look frozen (as Windows)."""
+        if (seq == self.seq and self.reading_since is not None and SHOW_POPUP
+                and self.overlay.mode == "transcribing"):
+            self.overlay.show_message(self.WORKING, ms=None)
 
     def on_cancel(self):
         self._pointer_hint(False)
@@ -5939,7 +5954,26 @@ class Dictation(QObject):
     def _on_live_text(self, session, text):
         if session == getattr(self, "live_session", 0) and self.recording and text \
                 and LIVE_PREVIEW and self.overlay.mode == "recording":
-            self.overlay.set_live_text(text)
+            text = self._steady_words(session, text)
+            if text:
+                self.overlay.set_live_text(text)
+
+    @staticmethod
+    def _plain_word(word):
+        return word.strip(".,!?;:\"'“”‘’").lower()
+
+    def _steady_words(self, session, text):
+        """The live words without a last word that is only a guess: each pass
+        reads up to the moment it starts, often in the middle of a word, and
+        the model then guesses ("process" for "project"). The last word is
+        shown once a second pass has heard it too."""
+        words = text.split()
+        prev = self._live_prev if getattr(self, "_live_prev_session", None) == session else []
+        self._live_prev, self._live_prev_session = words, session
+        if len(words) > 1 and self._plain_word(words[-1]) not in {
+                self._plain_word(w) for w in prev[-3:]}:
+            words = words[:-1]
+        return " ".join(words)
 
     # -- typing as you speak (ported from Windows) ---------------------------------
     LT_CONTEXT = 2.0     # seconds of what came before, read along with each piece
