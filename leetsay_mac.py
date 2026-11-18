@@ -5229,6 +5229,7 @@ class Dictation(QObject):
         self.keyboard_asked = False
         self.reading_since = None            # set while a dictation's text is being read
         self.live_session = 0                # each dictation's number (for its readings)
+        self.clicked_start = False           # this dictation was started by a click
         self.perm_checks = 0
         self.settings_window = None
         self.box_state = "unknown"     # the latest text box answer
@@ -5897,7 +5898,35 @@ class Dictation(QObject):
         self.notice_action = action
         self.overlay.update()
 
+    LIVE_TIP = "Want words typed as you speak? Click me"
+    LIVE_TIP_AFTER = 3                           # dictations in this session
+
+    def maybe_live_tip(self):
+        """Once ever, after a few dictations in one session with "Type as you
+        speak" off: the pill says it exists; a click opens Settings > Typing.
+        Nothing is counted beyond this session; only "seen" is saved. (As
+        Windows.)"""
+        if LIVE_TYPE or _config.get("live_tip_seen"):
+            return
+        self.typed_this_session = getattr(self, "typed_this_session", 0) + 1
+        if self.typed_this_session != self.LIVE_TIP_AFTER:
+            return
+
+        def show():
+            setup = getattr(self, "setup_window", None)
+            busy = (self.recording or self.reading_since is not None
+                    or (setup is not None and setup.isVisible()))
+            if busy or LIVE_TYPE or _config.get("live_tip_seen"):
+                return                           # busy: on a later dictation, never
+            save_setting("live_tip_seen", True)
+            self.overlay.show_message(self.LIVE_TIP, ms=6000, pulse=True)
+        QTimer.singleShot(2500, show)            # once the words are typed
+
     def _notice_clicked(self):
+        if getattr(self.overlay, "message", "") == self.LIVE_TIP:
+            self.overlay.dismiss()
+            self.open_settings("Typing")         # where "Type as you speak" is
+            return
         action, self.notice_action = self.notice_action, None
         if action is not None:
             action()
@@ -6814,6 +6843,7 @@ class Dictation(QObject):
         if ADD_SPACE and not after_key:
             text += " "                  # so the next dictation doesn't run on
         self._deliver(text, after_key)
+        self.maybe_live_tip()
 
     def _step_aside_check(self):
         """While a full-screen app (a game, a video) covers the pill's screen,
