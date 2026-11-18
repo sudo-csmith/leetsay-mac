@@ -6717,6 +6717,7 @@ class Dictation(QObject):
         if not self.recording or getattr(self, "_finishing", False):
             return
         self._finishing = True
+        self.lt_hurry = True                     # words still waiting go in now
         session = self.live_session
         QTimer.singleShot(LAST_WORD_MS, lambda: self._finish(session))
 
@@ -6892,6 +6893,7 @@ class Dictation(QObject):
         self.lt_held = None                  # punctuation held back at a piece's end
         self.lt_box = ("unknown", 0.0)       # the latest text box answer, and when
         self.lt_credit = 0.0
+        self.lt_hurry = False                # you let go: waiting words go in at once
         self._final_before = ""
 
     def _lt_forget(self):
@@ -7180,7 +7182,12 @@ class Dictation(QObject):
             self.lt_counts[1] += 1
             self.lt_pacer.stop()
             return
-        self.lt_credit += max(len(self.lt_pending) / 6.0, 2.0)
+        rate = max(len(self.lt_pending) / 6.0, 2.0)
+        if getattr(self, "lt_hurry", False):
+            # You let go: what is waiting goes in within about 0.1 s, so it
+            # is in before you press Return or click Send (as Windows).
+            rate = max(rate, len(self.lt_pending) / 3.0, 3.0)
+        self.lt_credit += rate
         count = min(len(self.lt_pending), int(self.lt_credit))
         if count < 1:
             return
