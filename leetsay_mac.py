@@ -6952,6 +6952,8 @@ class Dictation(QObject):
         self.lt_box = ("unknown", 0.0)       # the latest text box answer, and when
         self.lt_credit = 0.0
         self.lt_hurry = False                # you let go: waiting words go in at once
+        self.lt_last_add = self.lt_gap = None    # steady flow: learnt afresh
+        self.lt_flow_until = 0.0
         self._final_before = ""
 
     def _lt_forget(self):
@@ -7162,9 +7164,22 @@ class Dictation(QObject):
         self.lt_all += self._plain(words)
         return join_words([text + " ".join(words)])
 
+    LT_FLOW = (0.35, 1.2)        # seconds: the shortest and longest spread of a batch
+
     def _queue_words(self, words, before=None, piece_end=False):
         text = self._compose(words, before, piece_end)
         if text:
+            # Steady flow: each batch of words is spread over the time until
+            # the next one usually arrives (learnt as you speak), so the words
+            # flow out instead of jumping in and then waiting (as Windows).
+            now = time.monotonic()
+            last = getattr(self, "lt_last_add", None)
+            gap = getattr(self, "lt_gap", None) or 0.7
+            if last is not None and now - last < 3.0:
+                gap = 0.7 * gap + 0.3 * (now - last)
+            self.lt_gap = min(max(gap, self.LT_FLOW[0]), self.LT_FLOW[1])
+            self.lt_last_add = now
+            self.lt_flow_until = now + self.lt_gap
             self.lt_pending += text
             self._flush_live()
 
@@ -7240,12 +7255,20 @@ class Dictation(QObject):
             self.lt_counts[1] += 1
             self.lt_pacer.stop()
             return
-        rate = max(len(self.lt_pending) / 6.0, 2.0)
+        # A steady flow: what is waiting is spread evenly over the time until
+        # the next words usually arrive (see _queue_words), so it never stops
+        # and starts in jumps; with a lot waiting it goes faster (at most
+        # about a second behind).
+        left = max(getattr(self, "lt_flow_until", 0.0) - time.monotonic(), 0.06)
+        waiting = len(self.lt_pending)
+        rate = waiting * 0.03 / left                       # letters this tick
+        if waiting > 40:
+            rate = max(rate, waiting / 8.0)              # far behind: catch up
         if getattr(self, "lt_hurry", False):
             # You let go: what is waiting goes in within about 0.1 s, so it
             # is in before you press Return or click Send (as Windows).
-            rate = max(rate, len(self.lt_pending) / 3.0, 3.0)
-        self.lt_credit += rate
+            rate = max(rate, waiting / 3.0, 3.0)
+        self.lt_credit += max(rate, 0.35)
         count = min(len(self.lt_pending), int(self.lt_credit))
         if count < 1:
             return
