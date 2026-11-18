@@ -5043,6 +5043,7 @@ class Dictation(QObject):
         self.after_ticket = 0
         self.mic_asked = False
         self.keyboard_asked = False
+        self.reading_since = None            # set while a dictation's text is being read
         self.perm_checks = 0
         self.settings_window = None
         self.box_state = "unknown"     # the latest text box answer
