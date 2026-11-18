@@ -1763,8 +1763,9 @@ def select_text_box_at(x, y, pid):
     (x, y) is an editable text box of the app with process number pid, give
     it the keyboard focus through macOS Accessibility, as if it had been
     clicked (nothing is clicked). Never a password box, a window, a panel, a
-    button or a link. A web page's text box may answer with a part of
-    itself, so up to two of its parents are looked at too. True if done."""
+    button or a link. Web pages and code editors answer with the line of text
+    under the mouse, not the box round it: what holds it is looked at, up to
+    6 layers up, for the text box itself (as Windows). True if done."""
     global _ax_system
     try:
         if _ax_system is None:
@@ -1781,7 +1782,7 @@ def select_text_box_at(x, y, pid):
             return False                         # another app (or leetsay's own window): never
         held, node = [hit.value], hit.value
         try:
-            for _ in range(3):
+            for _ in range(7):                   # the element, then 6 layers up
                 role = _ax_string(node, "AXRole")
                 subrole = _ax_string(node, "AXSubrole")
                 if "AXSecureTextField" in (role, subrole):
@@ -1793,8 +1794,10 @@ def select_text_box_at(x, y, pid):
                         return False             # read-only text
                     return AXUIElementSetAttributeValue(
                         node, _ax_name("AXFocused"), kCFBooleanTrue.value) == 0
-                if role in NOT_TEXT_ROLES or role in ("AXWindow", "AXApplication", ""):
-                    return False
+                if role in ("AXWindow", "AXApplication", "AXWebArea", "AXBrowser", ""):
+                    return False                 # no text box round it: the page or window
+                # A button or a link is never selected itself, but one inside a
+                # text box (a search field's clear button) leads to the box.
                 parent = _ax_copy(node, "AXParent")
                 if not parent:
                     return False
