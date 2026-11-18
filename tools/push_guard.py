@@ -21,6 +21,7 @@ SKIP_CONTENT = ("licenses/",)        # third-party licence texts (their authors'
 HOME_PATH = re.compile(r"/(?:Users|home)/(?!runner\b|Shared\b)[A-Za-z0-9._-]+/")
 BAD_FILE = re.compile(
     r"(^|/)(CLAUDE[^/]*\.md|[^/]*handoff[^/]*|START-HERE[^/]*|NOTES[^/]*|[^/]*\.notes\.md|"
+    r"[^/]*-local\.md|CHANGELOG[^/]*|PARITY[^/]*|CHANGES[^/]*|"
     r"settings\.json(\.[^/]*)?|\.push-guard\.local|tests-private/.*|windows-reference/.*|"
     r"\.claude/.*|[^/]*\.(log|wav|aiff|m4a|mp3|p12|p8|cer|certSigningRequest))$", re.I)
 

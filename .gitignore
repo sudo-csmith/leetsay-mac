@@ -6,6 +6,10 @@ CLAUDE*.md
 START-HERE*
 NOTES*
 *.notes.md
+*-local.md
+CHANGELOG*
+PARITY*
+CHANGES*
 *.log
 *.wav
 *.aiff
