@@ -311,6 +311,7 @@ SCREEN_GLOW_FOCUS = "middle"         # one side's glow: "middle", "corners" or "
 SCREEN_GLOW_SCREENS = "popup"        # on which screens: "popup" (the pop-up's), "all", "main"
 TRAY_LIVE = False                    # the menu bar icon's bars move with your voice
 POINTER_HINT = True                  # say "No text box" by the mouse pointer too
+POINTER_STATUS = True                # "Listening" / "Typing..." by the pointer (as Windows)
 CHECK_APP_UPDATES = False            # ask github.com for a newer version at startup
                                      # (off unless switched on, after a warning)
 SOUNDS = True                        # soft tone on start and on finish (as on Windows)
@@ -518,7 +519,8 @@ def apply_config():
     if isinstance(_config.get("mic"), str):
         globals()["MIC_DEVICE"] = _config["mic"]
     for name, key in (("SCREEN_GLOW", "screen_glow"), ("SCREEN_GLOW_FLOW", "screen_glow_flow"),
-                      ("TRAY_LIVE", "tray_live"), ("POINTER_HINT", "pointer_hint")):
+                      ("TRAY_LIVE", "tray_live"), ("POINTER_HINT", "pointer_hint"),
+                      ("POINTER_STATUS", "pointer_status")):
         if isinstance(_config.get(key), bool):
             globals()[name] = _config[key]
     for name, key, low, high in (("SCREEN_GLOW_STRENGTH", "screen_glow_strength", 5, 100),
@@ -2404,10 +2406,10 @@ def mac_overlay_window(widget):
 
 
 class PointerBadge(QtWidgets.QWidget):
-    """A small "No text box" tag that follows the mouse pointer while typing
-    as you speak waits for a text box (your eyes are often where the pointer
-    is, not on the pop-up). Clicks pass straight through it, it never takes
-    the keyboard, and the real pointer is left alone."""
+    """A small tag that follows the mouse pointer (your eyes are often where
+    the pointer is, not on the pop-up): "No text box" in amber, or a
+    microphone problem in red. Clicks pass straight through it, it never
+    takes the keyboard, and the real pointer is left alone."""
 
     OFFSET = QtCore.QPoint(16, 4)                # right beside the pointer's tip
 
@@ -2423,13 +2425,24 @@ class PointerBadge(QtWidgets.QWidget):
         font.setPixelSize(12)
         font.setWeight(QtGui.QFont.DemiBold)
         self.font_ = font
-        width = QtGui.QFontMetricsF(font).horizontalAdvance(self.text)
-        self.resize(int(width + 41), 24)          # room for the leetsay logo
+        self.colour = "warning"                  # a key of popup_theme(): amber or red
+        self._fit()
         self.timer = QtCore.QTimer(self)
         # Follows the pointer about 100 times a second while it shows (30 a
         # second looked jerky beside the pointer itself).
         self.timer.setInterval(10)
         self.timer.timeout.connect(self._follow)
+
+    def _fit(self):
+        width = QtGui.QFontMetricsF(self.font_).horizontalAdvance(self.text)
+        self.resize(int(width + 41), 24)          # room for the leetsay logo
+
+    def say(self, text, colour="warning"):
+        """What the tag says, and in which colour ("warning" amber, "danger" red)."""
+        if (text, colour) != (self.text, self.colour):
+            self.text, self.colour = text, colour
+            self._fit()
+            self.update()
 
     def showEvent(self, event):              # Mac: above everything, clicks pass through
         super().showEvent(event)
@@ -2459,15 +2472,23 @@ class PointerBadge(QtWidgets.QWidget):
         if target == 0.0 and shown <= 0.01:
             self.timer.stop()
             self.hide()
+            self._last_cursor = None
             return
-        spot = QtGui.QCursor.pos() + self.OFFSET
+        # Moved only when the mouse moved: every move of a window beside the
+        # pointer makes the program under it redraw its pointer, and at 125%
+        # scaling a "still there?" check against the window's own (rounded)
+        # position nudged it 18 times a second: the pointer flickered.
+        cursor = QtGui.QCursor.pos()
+        if cursor == getattr(self, "_last_cursor", None) and self.isVisible():
+            return
+        self._last_cursor = cursor
+        spot = cursor + self.OFFSET
         screen = QtGui.QGuiApplication.screenAt(QtGui.QCursor.pos())
         if screen is not None:                   # never off the screen's edge
             room = screen.availableGeometry()
             spot.setX(min(spot.x(), room.right() - self.width()))
             spot.setY(min(spot.y(), room.bottom() - self.height()))
-        if spot != self.pos():
-            self.move(spot)
+        self.move(spot)
 
     def paintEvent(self, _event):
         theme = popup_theme()
@@ -2477,13 +2498,15 @@ class PointerBadge(QtWidgets.QWidget):
             box = QtCore.QRectF(0.5, 0.5, self.width() - 1.0, self.height() - 1.0)
             fill = QtGui.QColor(theme["bg"])
             fill.setAlpha(240)
-            p.setPen(QtGui.QPen(QtGui.QColor(theme["warning"]), 1.0))
+            colour = (QtGui.QColor(ACCENT) if self.colour == "accent"
+                      else QtGui.QColor(theme.get(self.colour, theme["warning"])))
+            p.setPen(QtGui.QPen(colour, 1.0))
             p.setBrush(fill)
             p.drawRoundedRect(box, box.height() / 2.0, box.height() / 2.0)
-            # leetsay's logo (its four 1337 bars) in amber, so it is clear
-            # where the note comes from.
+            # leetsay's logo (its four 1337 bars) in the tag's colour, so it
+            # is clear where the note comes from.
             p.setPen(Qt.NoPen)
-            p.setBrush(QtGui.QColor(theme["warning"]))
+            p.setBrush(colour)
             bar, gap, tallest = 2.4, 1.6, 11.0
             unit = tallest / float(max(ICON_BARS))
             cy = box.center().y()
@@ -2497,7 +2520,6 @@ class PointerBadge(QtWidgets.QWidget):
                        Qt.AlignLeft | Qt.AlignVCenter, self.text)
         finally:
             p.end()
-
 
 class EdgeStrip(QtWidgets.QWidget):
     """One edge of the screen glow: a thin see-through window along a screen
@@ -3496,6 +3518,7 @@ class Overlay(QtWidgets.QWidget):
     CARD_EDGE_GAP = 24             # a dictation card's room from the screen's edges
     TASKBAR_GAP = 18               # ... and from the taskbar
     NO_BOX = "No text box selected"
+    CANT_HEAR = "Can't hear you. Check the mic"
     NO_MIC = "Microphone not detected  \u00b7  click for help"
 
     def _mic_warning(self):
@@ -3505,7 +3528,7 @@ class Overlay(QtWidgets.QWidget):
         if elapsed > 1.5 and peak < MIC_SILENT_PEAK:
             return self.NO_SOUND
         if elapsed > 5.0 and peak < MIC_QUIET_PEAK and not self.live_text:
-            return "Can't hear you. Check the mic"
+            return self.CANT_HEAR
         if self.box_missing:
             # (Mac: a string is said as it is, e.g. a password field.)
             return self.box_missing if isinstance(self.box_missing, str) else self.NO_BOX
@@ -5120,6 +5143,7 @@ class Dictation(QObject):
     model_ready = Signal(bool, str)
     result = Signal(int, str, bool)
     typed = Signal(str)
+    box_answer = Signal(str)             # the text box check, from its own thread
     after_ready = Signal(str)            # the text is in: the key after it, if any
     live_text = Signal(int, str)
     live_words = Signal(int, str, int, str)        # typing as you speak: a reading
@@ -5204,6 +5228,7 @@ class Dictation(QObject):
         self.mic_asked = False
         self.keyboard_asked = False
         self.reading_since = None            # set while a dictation's text is being read
+        self.live_session = 0                # each dictation's number (for its readings)
         self.perm_checks = 0
         self.settings_window = None
         self.box_state = "unknown"     # the latest text box answer
@@ -5211,6 +5236,14 @@ class Dictation(QObject):
         self.model_ready.connect(self._on_model_ready)
         self.result.connect(self._on_result)
         self.typed.connect(self._on_typed)
+        self.box_answer.connect(self._on_box_answer)
+        self._box_busy = False
+        self._typing_busy = False                # words being typed (for "Typing..." at the pointer)
+        self.typed_quiet_until = 0.0
+        self._typing_watch_until = 0.0
+        self.typing_watch = QTimer(self)         # "Typing..." at the pointer until done
+        self.typing_watch.setInterval(100)
+        self.typing_watch.timeout.connect(self._typing_watch)
         self.after_ready.connect(self._press_after)
         self._build_tray()
         self.watchdog = QTimer(self)
@@ -5942,6 +5975,7 @@ class Dictation(QObject):
             log.exception("microphone start")
             self.notice(Overlay.NO_MIC, ms=4000,
                         action=lambda: open_settings_pane("microphone"))
+            self._pointer_note(self.POINTER_MIC[Overlay.NO_MIC], 3000)
             return
         log.info("microphone opened in %.0f ms", getattr(self.recorder, "open_ms", 0))
         self.recording = True
@@ -5969,25 +6003,51 @@ class Dictation(QObject):
         self.after_ticket += 1                   # a key still waiting is called off
         self._lt_reset()
         self._start_effects()
-        if TEXTBOX_ONLY or self.lt_active:
+        self.typing_watch.stop()                 # a new dictation: "Typing..." is over
+        self._typing_busy = False
+        if TEXTBOX_ONLY or self.lt_active or POINTER_STATUS or POINTER_HINT:
+            # The text box, the microphone and "Listening" at the pointer.
             self.box_timer.setInterval(250 if self.lt_active else 400)
             QTimer.singleShot(40, self._check_box)   # after the card is on screen
             self.box_timer.start()
+        if POINTER_STATUS and not self.lt_active:
+            self._pointer_hint(False)            # "Listening" at once
         self.live_timer.setInterval(120 if self.lt_active else LIVE_EVERY_MS)
         if (LIVE_PREVIEW and SHOW_POPUP) or self.lt_active:
             self.live_timer.start()
 
     def _check_box(self):
         """While dictating: say in time if the words would have nowhere to go.
-        A "no" must be seen twice in a row (a click can briefly move the focus)."""
+        A "no" must be seen twice in a row (a click can briefly move the focus).
+        macOS is asked in a thread of its own (as Windows), so an app that is
+        slow to answer can't hold up the pop-up."""
         if not self.recording:
             self.box_timer.stop()
             return
-        state = focused_text_box()
+        if not (TEXTBOX_ONLY or self.lt_active):
+            self._pointer_hint(False)            # the microphone and "Listening" only
+            return
+        if self._box_busy:
+            return
+        self._box_busy = True
+
+        def ask():
+            try:
+                state = focused_text_box()
+            except Exception:
+                state = "unknown"
+            self.box_answer.emit(state)
+        threading.Thread(target=ask, daemon=True).start()
+
+    def _on_box_answer(self, state):
+        self._box_busy = False
+        if not self.recording:
+            return
         self.lt_box = (state, time.monotonic())
         if not TEXTBOX_ONLY:                     # only asked for typing as you speak
             self.overlay.box_missing = ("Password field: nothing will be typed"
                                         if state == "password" else False)
+            self._pointer_hint(False)
             return
         was = self.overlay.box_missing
         self.box_no_count = self.box_no_count + 1 if state == "no" else 0
@@ -5999,14 +6059,98 @@ class Dictation(QObject):
             self._show_typed(self.live_session, [])   # the card: as it is in your app
         self._pointer_hint(bool(self.overlay.box_missing) and self.recording)
 
+    POINTER_MIC = {Overlay.NO_SOUND: "No sound from the microphone",
+                   Overlay.CANT_HEAR: "Can't hear you",
+                   Overlay.NO_MIC: "Microphone not detected"}
+
     def _pointer_hint(self, show):
-        """The "No text box" tag by the mouse pointer (on by default)."""
-        if show and POINTER_HINT:
+        """The tag by the mouse pointer (as Windows). A microphone problem comes
+        first, in red: without sound nothing else matters. Then "No text box",
+        in amber, when show is true. Then "Listening", in your colour, while
+        you dictate (Settings: both on by default; not with typing as you
+        speak)."""
+        mic = self.POINTER_MIC.get(self.overlay.warning) if self.recording else None
+        status = POINTER_STATUS and self.recording and not self.lt_active
+        if (POINTER_HINT and (mic or show)) or status:
             if self.pointer_badge is None:
                 self.pointer_badge = PointerBadge()
+            if mic and POINTER_HINT:
+                look = (mic, "danger")
+            elif show and POINTER_HINT:
+                look = ("No text box", "warning")
+            else:
+                look = ("Listening", "accent")
+            self._badge_look(look)
             self.pointer_badge.appear()
         elif self.pointer_badge is not None:
             self.pointer_badge.vanish()
+
+    BADGE_HOLD = 0.9             # seconds a look stays before the tag may change again
+
+    def _badge_look(self, look, now=False):
+        """Change what the tag says only once the new look has been wanted
+        steadily for about a second (as Windows): a text box answer that
+        wavers must not make the tag flash between "Listening" and "No text
+        box". A microphone problem (red) and "Typing..." show at once."""
+        badge = self.pointer_badge
+        if look == (badge.text, badge.colour):
+            self._badge_pending = None
+            return
+        moment = time.monotonic()
+        if now or look[1] == "danger" or not badge.isVisible():
+            self._badge_pending = None
+            badge.say(*look)
+            return
+        pending = getattr(self, "_badge_pending", None)
+        if pending is None or pending[0] != look:
+            self._badge_pending = (look, moment)  # wanted from now on: wait and see
+            return
+        if moment - pending[1] >= self.BADGE_HOLD:
+            self._badge_pending = None
+            badge.say(*look)
+
+    def _pointer_off(self, typing=False):
+        """The dictation is over (or cancelled): the tag goes. typing=True (let
+        go): it says "Typing..." until the words are in, then goes."""
+        self.box_timer.stop()
+        if typing and POINTER_STATUS and not self.lt_active and self.pointer_badge is not None:
+            self._badge_look(("Typing\u2026", "accent"), now=True)
+            self.pointer_badge.appear()
+            self.typed_quiet_until = time.monotonic() + 0.8   # until the typing starts
+            self._typing_watch_until = time.monotonic() + 30.0
+            self.typing_watch.start()
+            return
+        self.typing_watch.stop()
+        if self.pointer_badge is not None:
+            self.pointer_badge.vanish()
+
+    def _typing_watch(self):
+        """ "Typing..." at the pointer goes once the words are in: the text is
+        read, nothing is being typed, and a moment has passed (or after 30 s,
+        or when a new dictation starts)."""
+        now = time.monotonic()
+        if self.recording:
+            self.typing_watch.stop()
+            return
+        busy = (self.reading_since is not None or self._typing_busy
+                or now < self.typed_quiet_until)
+        if busy and now < self._typing_watch_until:
+            return
+        self.typing_watch.stop()
+        if self.pointer_badge is not None:
+            self.pointer_badge.vanish()
+
+    def _pointer_note(self, text, ms):
+        """A microphone problem said at the pointer for a moment, when no
+        dictation is running to keep it there."""
+        if not POINTER_HINT:
+            return
+        if self.pointer_badge is None:
+            self.pointer_badge = PointerBadge()
+        self.pointer_badge.say(text, "danger")
+        self.pointer_badge.appear()
+        badge = self.pointer_badge
+        QTimer.singleShot(ms, lambda: badge.vanish() if not self.recording else None)
 
     def demo_screen_glow(self):
         """From Settings: show the screen glow for a moment (nothing records)."""
@@ -6088,7 +6232,6 @@ class Dictation(QObject):
         self._finishing = False
         if not self.recording or session != self.live_session:
             return
-        self._pointer_hint(False)
         self.recording = False
         self.live_timer.stop()
         if not self.lt_active:
@@ -6098,6 +6241,9 @@ class Dictation(QObject):
         self.lt_pacer.stop()
         # A tap, judged as on Windows: less sound than a tap plus the catch.
         tap = len(audio) < rate * (TAP_SECONDS + (LAST_WORD_MS - 250) / 1000.0)
+        silent = audio.size == 0 or float(np.max(np.abs(audio))) < MIC_SILENT_PEAK
+        # The pointer tag: gone for a tap or silence; else "Typing..." until done.
+        self._pointer_off(typing=not tap and not silent)
         if not tap:
             play_sound("finish")
         if tap:
@@ -6153,7 +6299,7 @@ class Dictation(QObject):
             self.overlay.show_message(self.WORKING, ms=None)
 
     def on_cancel(self):
-        self._pointer_hint(False)
+        self._pointer_off()
         if self.recording:
             self.recording = False
             self.live_timer.stop()
@@ -6784,6 +6930,7 @@ class Dictation(QObject):
         if text and not TYPE_TEXT:
             self._paste(text, after_key)
             return
+        self._typing_busy = bool(text)          # "Typing..." at the pointer until done
         def work():
             problem = type_text(text) if text else None
             self.typed.emit(problem or "")
@@ -6851,6 +6998,7 @@ class Dictation(QObject):
         self.overlay.dismiss()
 
     def _on_typed(self, problem):
+        self._typing_busy = False
         if problem == "secure":
             self.overlay.show_message("Not typed: a password field is active", ms=3500)
         elif problem == "no_permission":
@@ -7316,7 +7464,7 @@ for _key in ("add_space", "always_show", "pill_over_fullscreen", "accent_outline
              "show_popup", "show_timer", "show_waveform", "sounds", "tray_live", "wide_card",
              "live_preview", "type_text", "keep_last", "check_app_updates", "live_type",
              "remove_fillers", "textbox_only", "screen_glow_flow", "pointer_hint",
-             "spoken_breaks",
+             "spoken_breaks", "pointer_status",
              "hold_to_talk"):
     _PORTABLE_CHECKS[_key] = lambda v: isinstance(v, bool)
 
@@ -8047,8 +8195,12 @@ class SettingsWindow(QtWidgets.QDialog):
                  "macOS only what kind of control has the focus.")
         check("Show it at the mouse pointer", POINTER_HINT,
               option("POINTER_HINT", "pointer_hint"),
-              hint="\"No text box\" also appears right beside the pointer, where your "
-                   "eyes often are.")
+              hint="\"No text box\" and microphone problems, by the pointer.")
+        check("Show Listening and Typing at the pointer", POINTER_STATUS,
+              option("POINTER_STATUS", "pointer_status"),
+              tip="While you dictate, the tag by the pointer says \"Listening\", then "
+                  "\"Typing\u2026\" until your words are in. Not with typing as you speak.",
+              hint="While you dictate.")
         check("Remove filler words", REMOVE_FILLERS, option("REMOVE_FILLERS", "remove_fillers"),
               hint="Leaves out um, uh and erm.")
         check("Say \"new line\" for a line break", SPOKEN_BREAKS,
