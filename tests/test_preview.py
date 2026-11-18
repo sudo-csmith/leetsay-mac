@@ -1,7 +1,6 @@
-"""The live words on the card and the moment after letting go: a last word
-that only one reading has heard is held back until a second reading agrees
-(a half-heard word is a guess); a new dictation starts fresh; and if the
-final text isn't ready 0.7 s after letting go, the card becomes a small
+"""The live words on the card and the moment after letting go: the preview
+re-reads a short stretch of recent audio (so it keeps up), and if the final
+text isn't ready 0.7 s after letting go, the card becomes a small
 "Transcribing…" pill until the text is typed."""
 import os, sys, time
 sys.dont_write_bytecode = True
@@ -18,16 +17,6 @@ m.front_pid = lambda: 100
 m.SOUNDS = False
 d = m.Dictation(app)
 
-s = d._steady_words
-check("first pass: its last word is held back", s(1, "Hello team I wanted to") == "Hello team I wanted")
-check("next pass: a last word heard before is shown",
-      s(1, "Hello team I wanted to share") == "Hello team I wanted to")
-check("a guessed last word stays hidden", s(1, "Hello team I wanted to share a process") ==
-      "Hello team I wanted to share a")
-check("... and shows once heard again (punctuation ignored)",
-      s(1, "Hello team I wanted to share a process.") == "Hello team I wanted to share a process.")
-check("a single word is shown as it is", s(2, "Hello") == "Hello")
-check("a new dictation starts fresh", s(3, "Okay then") == "Okay")
 check("the reading window is short (8 s for two lines)",
       m.LIVE_WINDOW_SECONDS * m.LIVE_LINES <= 10, m.LIVE_WINDOW_SECONDS * m.LIVE_LINES)
 

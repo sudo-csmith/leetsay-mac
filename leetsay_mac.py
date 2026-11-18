@@ -6033,26 +6033,7 @@ class Dictation(QObject):
     def _on_live_text(self, session, text):
         if session == getattr(self, "live_session", 0) and self.recording and text \
                 and LIVE_PREVIEW and self.overlay.mode == "recording":
-            text = self._steady_words(session, text)
-            if text:
-                self.overlay.set_live_text(text)
-
-    @staticmethod
-    def _plain_word(word):
-        return word.strip(".,!?;:\"'“”‘’").lower()
-
-    def _steady_words(self, session, text):
-        """The live words without a last word that is only a guess: each pass
-        reads up to the moment it starts, often in the middle of a word, and
-        the model then guesses ("process" for "project"). The last word is
-        shown once a second pass has heard it too."""
-        words = text.split()
-        prev = self._live_prev if getattr(self, "_live_prev_session", None) == session else []
-        self._live_prev, self._live_prev_session = words, session
-        if len(words) > 1 and self._plain_word(words[-1]) not in {
-                self._plain_word(w) for w in prev[-3:]}:
-            words = words[:-1]
-        return " ".join(words)
+            self.overlay.set_live_text(text)
 
     # -- typing as you speak (ported from Windows) ---------------------------------
     LT_CONTEXT = 2.0     # seconds of what came before, read along with each piece
