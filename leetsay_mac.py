@@ -4947,6 +4947,7 @@ class Dictation(QObject):
         self.overlay.pill_clicked.connect(self.on_pill_clicked)
         self.overlay.settings_wanted.connect(self.open_settings)
         self.overlay.notice_clicked.connect(self._notice_clicked)
+        self.overlay.retry_wanted.connect(self.retry_download)   # right-click on the download card
         self.notice_action = None
         self.click_mode = False          # this dictation was started by clicking the pill
         self.model_lock = threading.Lock()
@@ -5260,10 +5261,12 @@ class Dictation(QObject):
         self.overlay.update()
 
     def download_clicked(self):
-        """The download card was clicked: help, or another try."""
+        """The download card was clicked: when it isn't moving, the help
+        window (as on Windows), with "Try again" and "Manual download" in it.
+        A right-click on the card tries again straight away."""
         self.notice_action = self.download_clicked     # stays clickable
         if self.download_blocked or self.download_stuck:
-            self.retry_download()
+            download_help(self.retry_download)
 
     def retry_download(self):
         if not self.downloading:
@@ -7308,6 +7311,41 @@ def download_question_words(name=None):
             f"2 MB) from this project's page on github.com, a third-party website that we "
             f"do not run or control. Every file is checked; after that, {APP_TITLE} works "
             f"offline.")
+
+
+STUCK_HELP = (
+    "Some of the speech model has not come through. The model comes from this "
+    "project's model page on github.com, and GitHub sends the files themselves from "
+    "release-assets.githubusercontent.com (or objects.githubusercontent.com). When "
+    "nothing more arrives, something between this Mac and those addresses is usually "
+    "blocking them: a firewall, an ad blocker, or a DNS filter (a Pi-hole, for "
+    "example).\n\n"
+    "What you can do:\n\n"
+    "1.  Allow github.com, release-assets.githubusercontent.com and "
+    "objects.githubusercontent.com in whatever is filtering your network, then click "
+    "\u201cTry again\u201d. It carries on from where it stopped.\n\n"
+    "2.  Or download the model yourself with your web browser, on this Mac or another "
+    "one. Click \u201cManual download\u201d for the steps.\n\n"
+    "{app} tries again by itself every 15 seconds or so, a few times; \u201cTry "
+    "again\u201d (or a right-click on the download card) makes it try right now. If "
+    "you have just switched a filter off, macOS may remember the old answer for a "
+    "while: restarting the Mac clears that.\n\n"
+    "To stop it and close {app}, click the {app} icon in the menu bar and choose "
+    "\u201cQuit {app}\u201d.")
+
+
+def download_help(retry=None):
+    """What to do when the model's download has stopped moving or seems
+    blocked (as Windows' download_help). In front of every other window,
+    the setup window included."""
+    buttons = (("Try again",) if retry else ()) + ("Manual download", "Close")
+    choice = dialog(f"{APP_TITLE}: download not moving", STUCK_HELP.format(app=APP_TITLE),
+                    buttons=buttons, headline="The download has stopped moving", width=460)
+    log.info("download help: %s", choice or "closed")
+    if choice == "Try again" and retry is not None:
+        retry()
+    elif choice == "Manual download":
+        manual_download_steps()
 
 
 def manual_download_steps():
