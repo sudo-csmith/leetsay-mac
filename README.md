@@ -1,7 +1,13 @@
 <p align="center">
-  <a href="https://github.com/sudo-csmith/leetsay-mac/releases"><img src="assets/leetsay-type-as-you-speak.gif" alt="Animation of leetsay typing words into a text box while the dictation card shows them." width="100%"></a>
+  <img src="assets/leetsay-hero-mac.gif" width="100%"
+  alt="Illustration: hold Right Option, speak, let go, and the words are typed into a text window.">
 </p>
-<p align="center"><sub>Illustration of typing as you speak (an optional setting), shown with the Windows hotkey; on a Mac it is Right Option. The real card follows your accent colour and theme.</sub></p>
+
+<p align="center">
+  <a href="https://github.com/sudo-csmith/leetsay"><img
+  src="assets/leetsay-for-windows.png" width="100%"
+  alt="Using Windows? Get leetsay for Windows"></a>
+</p>
 
 Local dictation for the Mac. Hold a key, speak, let go: your words are typed
 into whatever app you are using.
@@ -10,7 +16,7 @@ into whatever app you are using.
 - Speech is recognised on your own Mac. No accounts, statistics or tracking.
 - Open source, provided as is: please read the [Disclaimer](#disclaimer).
 
-**[Download for Mac](https://github.com/sudo-csmith/leetsay-mac/releases)** (macOS 14 Sonoma or later, Intel or Apple Silicon, a microphone, about 1 GB of free memory and 700 MB of disk space). The Windows version is at [sudo-csmith/leetsay](https://github.com/sudo-csmith/leetsay).
+**[Download for Mac](https://github.com/sudo-csmith/leetsay-mac/releases)** (macOS 14 Sonoma or later, Intel or Apple Silicon, a microphone, about 1 GB of free memory and about 800 MB of disk space). The Windows version is at [sudo-csmith/leetsay](https://github.com/sudo-csmith/leetsay).
 
 ## How it works
 
@@ -81,6 +87,13 @@ Terminal, not to leetsay.
 - **Type as you speak** (Settings › Typing, off by default) types your words
   while you talk. It is a little less accurate, because each word is typed
   before the rest of the sentence is heard.
+
+  <p align="center">
+    <img src="assets/leetsay-type-as-you-speak-mac.gif" width="100%"
+    alt="Illustration of typing as you speak: words appear in a text window while the dictation card shows them.">
+  </p>
+  <p align="center"><sub>Type as you speak is an optional setting and is off by default. Illustration, not a screen recording.</sub></p>
+
 - **Languages:** English by default; a model for 25 European languages is in
   Settings › Model.
 - **Word replacements** fix names the model doesn't know. Filler words such as
