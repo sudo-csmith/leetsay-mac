@@ -316,6 +316,7 @@ DICTATION_MARK = "pointer"           # Beta: "frame" = glow round the text box; 
                                      # tag at the pointer only (default); an older "off" turns
                                      # both the glow and Listening/Typing off (as Windows)
 DICTATION_MARKS = ("pointer", "frame", "off")
+POINT_TO_TYPE = False                # Beta: rest the mouse on a text box to select it (as Windows)
 CHECK_APP_UPDATES = False            # ask github.com for a newer version at startup
                                      # (off unless switched on, after a warning)
 SOUNDS = True                        # soft tone on start and on finish (as on Windows)
@@ -528,7 +529,7 @@ def apply_config():
         globals()["MIC_DEVICE"] = _config["mic"]
     for name, key in (("SCREEN_GLOW", "screen_glow"), ("SCREEN_GLOW_FLOW", "screen_glow_flow"),
                       ("TRAY_LIVE", "tray_live"), ("POINTER_HINT", "pointer_hint"),
-                      ("POINTER_STATUS", "pointer_status")):
+                      ("POINTER_STATUS", "pointer_status"), ("POINT_TO_TYPE", "point_to_type")):
         if isinstance(_config.get(key), bool):
             globals()[name] = _config[key]
     for name, key, low, high in (("SCREEN_GLOW_STRENGTH", "screen_glow_strength", 5, 100),
@@ -1738,6 +1739,67 @@ def focused_box_rect(whole_card=False):
     except Exception:
         log.exception("text box place")
         return None
+
+
+AXUIElementCopyElementAtPosition = _fn(_as, "AXUIElementCopyElementAtPosition", c_int32,
+                                       c_void_p, ctypes.c_float, ctypes.c_float,
+                                       POINTER(c_void_p))
+AXUIElementGetPid = _fn(_as, "AXUIElementGetPid", c_int32, c_void_p, POINTER(c_int32))
+AXUIElementIsAttributeSettable = _fn(_as, "AXUIElementIsAttributeSettable", c_int32,
+                                     c_void_p, c_void_p, POINTER(c_bool))
+AXUIElementSetAttributeValue = _fn(_as, "AXUIElementSetAttributeValue", c_int32,
+                                   c_void_p, c_void_p, c_void_p)
+
+
+def select_text_box_at(x, y, pid):
+    """ "Point at a text box to use it" (Beta, as Windows): if the element under
+    (x, y) is an editable text box of the app with process number pid, give
+    it the keyboard focus through macOS Accessibility, as if it had been
+    clicked (nothing is clicked). Never a password box, a window, a panel, a
+    button or a link. A web page's text box may answer with a part of
+    itself, so up to two of its parents are looked at too. True if done."""
+    global _ax_system
+    try:
+        if _ax_system is None:
+            _ax_system = AXUIElementCreateSystemWide()
+            AXUIElementSetMessagingTimeout(_ax_system, 0.25)
+        hit = c_void_p()
+        if AXUIElementCopyElementAtPosition(_ax_system, float(x), float(y), byref(hit)) != 0 \
+                or not hit.value:
+            return False
+        owner = c_int32(0)
+        if AXUIElementGetPid(hit.value, byref(owner)) != 0 or owner.value != pid \
+                or owner.value == os.getpid():
+            CFRelease(hit.value)
+            return False                         # another app (or leetsay's own window): never
+        held, node = [hit.value], hit.value
+        try:
+            for _ in range(3):
+                role = _ax_string(node, "AXRole")
+                subrole = _ax_string(node, "AXSubrole")
+                if "AXSecureTextField" in (role, subrole):
+                    return False                 # a password box: never
+                if role in TEXT_ROLES:
+                    can = c_bool(False)
+                    AXUIElementIsAttributeSettable(node, _ax_name("AXValue"), byref(can))
+                    if not can.value:
+                        return False             # read-only text
+                    return AXUIElementSetAttributeValue(
+                        node, _ax_name("AXFocused"), kCFBooleanTrue.value) == 0
+                if role in NOT_TEXT_ROLES or role in ("AXWindow", "AXApplication", ""):
+                    return False
+                parent = _ax_copy(node, "AXParent")
+                if not parent:
+                    return False
+                held.append(parent)
+                node = parent
+            return False
+        finally:
+            for value in held:
+                CFRelease(value)
+    except Exception:
+        log.exception("point at a text box")
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -5502,6 +5564,10 @@ class Dictation(QObject):
         self.frame_timer.setInterval(33)
         self.frame_timer.timeout.connect(self._frame_follow)
         self.frame_rect.connect(self._frame_place)
+        self.ptt = {"pos": None, "since": 0.0, "tried": False, "busy": False}
+        self.point_timer = QTimer(self)          # Beta: pointing at a text box
+        self.point_timer.setInterval(150)
+        self.point_timer.timeout.connect(self._point_to_type)
         self._box_busy = False
         self._typing_busy = False                # words being typed (for "Typing..." at the pointer)
         self.typed_quiet_until = 0.0
@@ -6308,6 +6374,9 @@ class Dictation(QObject):
             self.box_timer.start()
         if POINTER_STATUS and not self.lt_active:
             self._pointer_hint(False)            # "Listening" at once
+        self.ptt.update(pos=None, tried=False)
+        if POINT_TO_TYPE and TEXTBOX_ONLY:
+            self.point_timer.start()
         self.live_timer.setInterval(120 if self.lt_active else LIVE_EVERY_MS)
         if (LIVE_PREVIEW and SHOW_POPUP) or self.lt_active:
             self.live_timer.start()
@@ -6413,6 +6482,42 @@ class Dictation(QObject):
             self._badge_pending = None
             badge.say(*look)
 
+    POINT_REST = 0.5             # seconds the mouse rests on a text box
+    POINT_STILL_PX = 4           # moves smaller than this still count as resting
+
+    def _point_to_type(self):
+        """ "Point at a text box to use it" (Beta, as Windows): while the card
+        says "No text box selected", a mouse resting on a text box in the app
+        you started in selects it, through macOS Accessibility (no click, so a
+        held key can't turn it into a different kind of click). Once per spot."""
+        p = self.ptt
+        if not (POINT_TO_TYPE and TEXTBOX_ONLY and self.recording
+                and self.overlay.box_missing and self.target_pid
+                and front_pid() == self.target_pid):
+            p["pos"], p["tried"] = None, False
+            return
+        here = QtGui.QCursor.pos()
+        pos, now = (here.x(), here.y()), time.monotonic()
+        if (p["pos"] is None or abs(pos[0] - p["pos"][0]) > self.POINT_STILL_PX
+                or abs(pos[1] - p["pos"][1]) > self.POINT_STILL_PX):
+            p["pos"], p["since"], p["tried"] = pos, now, False   # moved: start again
+            return
+        if p["tried"] or p["busy"] or now - p["since"] < self.POINT_REST:
+            return
+        p["tried"] = True                        # this spot is asked about once
+        p["busy"] = True
+        pid = self.target_pid
+
+        def ask():
+            try:
+                if select_text_box_at(pos[0], pos[1], pid):
+                    log.info("Pointing: a text box was selected for you.")
+            except Exception:
+                pass
+            finally:
+                p["busy"] = False
+        threading.Thread(target=ask, daemon=True).start()
+
     FRAME_MAX_SHARE = 0.5        # a "box" covering more of its window is a panel: no glow
     WHOLE_CARD_APPS = ("com.microsoft.VSCode", "com.microsoft.VSCodeInsiders")
 
@@ -6487,6 +6592,7 @@ class Dictation(QObject):
         """The dictation is over (or cancelled): the tag goes. typing=True (let
         go): it says "Typing..." until the words are in, then goes."""
         self.box_timer.stop()
+        self.point_timer.stop()
         if typing and self.frame_on and self.box_glow is not None and not self.lt_active:
             self.box_glow.appear(live=False)     # still, while the words go in
             self.typed_quiet_until = time.monotonic() + 0.8
@@ -7852,7 +7958,7 @@ for _key in ("add_space", "always_show", "pill_over_fullscreen", "accent_outline
              "show_popup", "show_timer", "show_waveform", "sounds", "tray_live", "wide_card",
              "live_preview", "type_text", "keep_last", "check_app_updates", "live_type",
              "remove_fillers", "textbox_only", "screen_glow_flow", "pointer_hint",
-             "spoken_breaks", "pointer_status",
+             "spoken_breaks", "pointer_status", "point_to_type",
              "hold_to_talk"):
     _PORTABLE_CHECKS[_key] = lambda v: isinstance(v, bool)
 
@@ -9115,6 +9221,14 @@ class SettingsWindow(QtWidgets.QDialog):
               lambda on: set_option("DICTATION_MARK", "dictation_mark",
                                     "frame" if on else "pointer"),
               hint="Shows where your words will go. Fits best in VS Code.")
+        check("Point at a text box to use it", POINT_TO_TYPE,
+              option("POINT_TO_TYPE", "point_to_type"),
+              tip="While the pop-up says \"No text box selected\", rest the mouse on a text "
+                  "box for a moment and it is selected for you, as if you had clicked it "
+                  "(nothing is clicked). Only in the app you started in, only clear text "
+                  "boxes, never password boxes. Needs Text box detection.",
+              hint="Not in a text box? Rest your mouse on one and it's selected for you "
+                   "(no click).")
         end_tab()
 
         tabs.setCurrentIndex(min(SettingsWindow._last_tab, tabs.count() - 1))
