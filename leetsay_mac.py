@@ -5034,11 +5034,18 @@ class Overlay(QtWidgets.QWidget):
                     p.drawRoundedRect(card, radius, radius)
                     layer -= 1
 
+        # The card on whole screen pixels, so its edge and the ring round it
+        # are crisp (a ring between pixels looked soft and stepped). (As Windows.)
+        ratio = self.devicePixelRatioF() or 1.0
+        snap = lambda value: round(value * ratio) / ratio
+        card = QtCore.QRectF(snap(card.left()), snap(card.top()),
+                             snap(card.width()), snap(card.height()))
         if ACCENT_OUTLINE:
             # The ring sits just outside the card and follows its shape exactly.
             # It swells with your voice; optionally a brighter band of light
-            # travels round it.
-            thickness = 1.4 + 1.6 * self.ring
+            # travels round it. At rest it is whole screen pixels wide; drawn
+            # as a filled band whose inner edge meets the card exactly.
+            thickness = max(2, int(round(1.6 * ratio))) / ratio + 1.6 * self.ring
             if OUTLINE_LIGHT:
                 sweep = QtGui.QConicalGradient(QtCore.QPointF(cx, cy), -self.spin)
                 # The travelling light is the same colour, a shade lighter. (Much
@@ -5052,11 +5059,12 @@ class Overlay(QtWidgets.QWidget):
                 pen = QtGui.QPen(QtGui.QBrush(sweep), thickness)
             else:
                 pen = QtGui.QPen(vivid, thickness)
-            grow = thickness / 2.0
-            p.setPen(pen)
-            p.setBrush(Qt.NoBrush)
-            p.drawRoundedRect(card.adjusted(-grow, -grow, grow, grow),
-                              radius + grow, radius + grow)
+            band = QtGui.QPainterPath()
+            band.addRoundedRect(card.adjusted(-thickness, -thickness, thickness, thickness),
+                                radius + thickness, radius + thickness)
+            inside = QtGui.QPainterPath()
+            inside.addRoundedRect(card, radius, radius)
+            p.fillPath(band.subtracted(inside), pen.brush())
             p.setPen(Qt.NoPen)
 
         # The card itself: a touch lighter at the top than the bottom, with a
