@@ -6956,6 +6956,8 @@ class Dictation(QObject):
         words = [w for w in words if w[0]]
         before = [w for w, at in words if at < skip - 0.04]
         piece = [w for w, at in words if at >= skip - 0.04]
+        self._timed_all = [w for w, _at in words]        # the whole reading
+        self._timed_split = len(before)                  # where the times cut it
         return " ".join(piece), (before[-1] if before else "")
 
     def _live_read_run(self, audio, start, session, skip):
@@ -7018,6 +7020,31 @@ class Dictation(QObject):
             return min(len(typed), len(plain))
         last = blocks[-1]
         return min(len(plain), last.b + last.size + (len(typed) - (last.a + last.size)))
+
+    @classmethod
+    def _after_tail(cls, typed, words, split):
+        """Where the new words begin in a whole reading (context included),
+        found by lining its start up with the end of the typed text instead of
+        trusting the word times: those can put a word spoken just after the
+        pause into the context (it was never typed: endings went missing) or
+        a context word into the piece (typed twice). None when it can't be
+        lined up (then the times decide). typed: the text typed so far; words:
+        the whole reading; split: where the times cut it. (As Windows.)"""
+        tail = cls._plain(typed.split())[-30:]
+        plain = cls._plain(words)
+        if len(tail) < 2 or not plain:
+            return None
+        import difflib
+        best = None
+        for b in difflib.SequenceMatcher(None, tail, plain, autojunk=False) \
+                .get_matching_blocks():
+            # A run of 2+ words that reaches the end of the typed text (one
+            # last word heard differently allowed) and starts in the context.
+            if b.size >= 2 and b.a + b.size >= len(tail) - 1 and b.b <= max(split, 1):
+                end = b.b + b.size + (len(tail) - (b.a + b.size))
+                if best is None or end > best:
+                    best = end
+        return None if best is None else min(best, len(plain))
 
     REPEAT_MIN = 3               # words: a shorter echo can be meant ("no, no")
 
@@ -7172,8 +7199,9 @@ class Dictation(QObject):
                  "app or a text box, %d refused", *self.lt_counts)
         typed = self.lt_done
         words = words_of(text)               # a line break stays a word of its own
-        begin = self._after_typed(self._plain(words)) if words else 0
-        if words:
+        aligned, self._final_aligned = getattr(self, "_final_aligned", False), False
+        begin = self._after_typed(self._plain(words)) if words and not aligned else 0
+        if words and not aligned:
             begin = max(begin, self._skip_repeat(words))   # earlier words read again
         rest = self._compose(words[begin:], words[begin - 1] if begin
                              else (self._final_before or None))
@@ -7224,6 +7252,7 @@ class Dictation(QObject):
             # context: only the words after the context are new. Noise alone
             # after the last pause must not become a made-up "Okay" (see
             # speech_decision; nothing is dropped without a message).
+            self._final_aligned = False
             try:
                 levelled = leveled(audio)
                 with self.model_lock:
@@ -7237,6 +7266,16 @@ class Dictation(QObject):
                             self.result.emit(seq, "", what == "quiet")
                             return
                     text, self._final_before = self._timed_read(levelled, skip)
+                    whole = list(self._timed_all)
+                    at = self._after_tail(self.lt_done + self.lt_pending, whole,
+                                          self._timed_split)
+                    self._final_aligned = at is not None
+                    if at is not None:
+                        text = " ".join(whole[at:])
+                        self._final_before = whole[at - 1] if at else ""
+                        log.info("type as you speak: last reading lined up with the typed "
+                                 "text (the times said %d new, the line-up %d)",
+                                 len(whole) - self._timed_split, len(whole) - at)
                 text = join_words(clean_words(text.split()))
             except Exception:
                 log.exception("recognition failed")
