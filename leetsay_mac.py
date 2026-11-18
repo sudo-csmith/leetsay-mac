@@ -7300,6 +7300,9 @@ def import_settings_window(parent):
     def go(_checked=False):
         good, careful, dropped, why = read_settings_line(field.toPlainText())
         if why or not (good or careful):
+            if not why and not dropped:          # a valid line with nothing changed
+                why = ("Nothing to change: that line only has the default settings "
+                       "(%s exports only settings that were changed)." % APP_TITLE)
             problem.setText(why or "The line holds no settings that can be used on "
                                    "this Mac yet.")
             problem.setVisible(True)
