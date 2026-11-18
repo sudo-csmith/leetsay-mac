@@ -6833,24 +6833,15 @@ class Dictation(QObject):
         if self.model is None:
             self.overlay.show_message("Loading the speech model\u2026", ms=None)
         elif SHOW_POPUP:
-            self.overlay.show_transcribing()
+            # The card becomes a small "Transcribing..." pill (no sound wave)
+            # at once, and stays until the words are ready (as Windows).
+            self.overlay.show_message(self.WORKING, ms=None)
         quiet = float(np.max(np.abs(audio))) < MIC_QUIET_PEAK
         self.reading_since = time.monotonic()    # until its text is in (see on_press)
         threading.Thread(target=self._transcribe, args=(self.seq, audio, rate, quiet, skip),
                          daemon=True).start()
-        if not self.lt_active:
-            seq = self.seq
-            QTimer.singleShot(700, lambda: self._still_working(seq))
 
     WORKING = "Transcribing\u2026"
-
-    def _still_working(self, seq):
-        """A longer dictation takes a moment to turn into text: after 0.7 s the
-        card becomes a small "Transcribing…" pill until the text is typed, so
-        it doesn't look frozen (as Windows)."""
-        if (seq == self.seq and self.reading_since is not None and SHOW_POPUP
-                and self.overlay.mode == "transcribing"):
-            self.overlay.show_message(self.WORKING, ms=None)
 
     def on_cancel(self):
         self._pointer_off()
@@ -7416,6 +7407,8 @@ class Dictation(QObject):
         if seq != self.seq:
             return                       # an older dictation's (never mixed in)
         self.reading_since = None
+        if self.overlay.mode == "message" and self.overlay.message == self.WORKING:
+            self.overlay.dismiss()               # transcribed: "Transcribing..." goes
         if self.model is None:
             self.notice("Speech model not found", ms=3000)
             return
