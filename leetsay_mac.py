@@ -3699,6 +3699,7 @@ class Overlay(QtWidgets.QWidget):
         self.fade_target = 0.0
         self.started = time.monotonic()
         self.previewing = False    # showing a demo, not a real recording
+        self.preview_lines = False # the preview fills the chosen number of lines
         self.app_name = ""         # focused app, shown while recording
         self.app_icon = None
         self.hover = False         # mouse is over the pop-up
@@ -4103,6 +4104,19 @@ class Overlay(QtWidgets.QWidget):
         self.preview_ms = ms                     # None: stays until replaced
         self.preview_words = words
         self.show_recording(label)
+        # More than one line of words chosen: fill them with sample words, so
+        # the preview shows exactly how many lines (and how wide) it will be.
+        self.preview_lines = bool(LIVE_PREVIEW and LIVE_LINES > 1 and words is None)
+        if self.preview_lines:
+            sample = ("This is how your words will look while you speak. Each new line "
+                      "starts when the one above is full, so you can read more at a "
+                      "glance before the words are typed into your app.").split()
+            self.live_lines = [sample * 2]
+            self._rewrap()
+            self.live_lines = self.live_lines[:LIVE_LINES]
+            self.line_w = [None] * len(self.live_lines)
+            self.live_text = " ".join(word for line in self.live_lines for word in line)
+            self.rows = float(len(self.live_lines))
         if SHOW_APP_ICON:                        # a stand-in for the app's own icon
             try:
                 ratio = self.devicePixelRatioF()
@@ -4764,7 +4778,7 @@ class Overlay(QtWidgets.QWidget):
         third = LIVE_PREVIEW or bool(self.previewing and self.preview_words) or bool(warning)
         drop = 28                             # one top row: icon, wave and timer side
                                               # by side (there is no middle row)
-        lines = LIVE_LINES if (LIVE_PREVIEW and not self.previewing) else 1
+        lines = LIVE_LINES if (LIVE_PREVIEW and (not self.previewing or self.preview_lines)) else 1
         if third and lines > 1 and not warning:
             # How many rows the words need right now: the card starts with one
             # and grows a row at a time, up to the number chosen in Settings.
@@ -9758,11 +9772,13 @@ class SettingsWindow(QtWidgets.QDialog):
     def _lines_changed(self, index):
         set_option("LIVE_LINES", "live_lines", int(self.lines.itemData(index)))
         self.dictation.refresh_popup()
+        self.dictation.preview_popup()           # filled with sample words, every line
 
     def _wide_changed(self, index):
         set_option("WIDE_CARD", "wide_card", bool(self.wide.itemData(index)))
         set_option("CARD_WIDTH", "card_width", 0)
         self.dictation.refresh_popup()
+        self.dictation.preview_popup()           # show how it looks now
 
     def _text_size_changed(self, index):
         set_option("TEXT_SIZE", "text_size", int(self.text_size.itemData(index)))
