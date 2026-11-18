@@ -137,6 +137,9 @@ except the items marked below, and only when you choose them.
   (such as your IP address and the files requested) reaches GitHub and the
   networks in between. That is handled under GitHub's own privacy policy, not
   this one. leetsay sends no account details or identifiers of its own.
+- Downloads are verified against the certificates this Mac trusts (macOS's
+  own check, as in Safari), and every file is still checked against its
+  fingerprint built into leetsay before it is used.
 - When the download is finished (or has failed three times in a row), the
   network block is restored.
 - Your agreement to a download is not remembered: each download asks again.

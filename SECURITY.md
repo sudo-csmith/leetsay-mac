@@ -35,9 +35,10 @@ problem publicly. There is no bug bounty.
   not match is not used: leetsay offers only to download it again, or to
   quit. A download goes into a separate folder and replaces the old files only
   once every new file has been checked.
-- **Checked connections.** Downloads use HTTPS. The certificate is checked by
-  macOS's own certificate check (the authorities this Mac trusts, as in
-  Safari), and leetsay never switches that check off. A company's security
+- **Checked connections.** Downloads use HTTPS and are verified against the
+  certificates this Mac trusts (macOS's own certificate check, as in Safari),
+  and every file is still checked against its built-in fingerprint. leetsay
+  never switches the certificate check off. A company's security
   program that inspects connections (Netskope, Zscaler) works if macOS trusts
   its certificate; the model's files are still checked against their built-in
   fingerprints, so such a program could block or watch the download but not
