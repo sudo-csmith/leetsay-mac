@@ -3,7 +3,8 @@ turn; the window keeps ONE size for all of them (General sets it: no page or
 part is taller, as Windows) and fits the screen. Long pages are split into
 parts with pills at the top, as Windows: Typing (Text / Where your words go),
 Pop-up (While dictating / Between dictations), Look (Colours / Glow), Audio
-(Microphone / Sounds), Privacy (Updates & data / Help). Pictures saved when
+(Microphone / Sounds), Privacy (Model / Updates & data / Help: the Model
+page moved into Privacy, as Windows). Beta is last. Pictures saved when
 LEETSAY_TEST_OUT is set. (Was tabstest.)"""
 import os, sys
 sys.dont_write_bytecode = True
@@ -20,9 +21,10 @@ PARTS = {"Typing": ["Text", "Where your words go"],
          "Pop-up": ["While dictating", "Between dictations"],
          "Look": ["Colours", "Glow"],
          "Audio": ["Microphone", "Sounds"],
-         "Privacy": ["Updates & data", "Help"]}
-check("pages as Windows (the Pill page is part of Pop-up)", "Pill" not in m.SettingsWindow.TABS,
-      m.SettingsWindow.TABS)
+         "Privacy": ["Model", "Updates & data", "Help"]}
+check("pages as Windows (Pill is part of Pop-up, Model of Privacy, Beta last)",
+      m.SettingsWindow.TABS == ("General", "Typing", "Pop-up", "Look", "Audio", "Privacy",
+                                "Beta"), m.SettingsWindow.TABS)
 sizes = {}
 for i, name in enumerate(m.SettingsWindow.TABS):
     w.show_tab(name)

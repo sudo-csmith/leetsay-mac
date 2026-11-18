@@ -99,16 +99,16 @@ Terminal, not to leetsay.
   <p align="center"><sub>Type as you speak is an optional setting and is off by default. Illustration, not a screen recording.</sub></p>
 
 - **Languages:** English by default; a model for 25 European languages is in
-  Settings › Model.
+  Settings › Privacy › Model.
 - **Word replacements** fix names the model doesn't know. Filler words such as
   "um" are left out by default. Settings move between Macs and PCs with
-  **Export settings** and **Import settings** (Settings › Privacy).
+  **Export settings** and **Import settings** (Settings › Privacy › Help).
 
 ## Uninstalling
 
-In Settings › Model, **Remove model**; untick **Start at login** (Settings ›
-General); quit leetsay and drag it from Applications to the Bin. To remove its
-settings and log too, delete `~/Library/Application Support/leetsay` and
+In Settings › Privacy › Model, **Remove model**; untick **Start at login**
+(Settings › General); quit leetsay and drag it from Applications to the Bin.
+To remove its settings and log too, delete `~/Library/Application Support/leetsay` and
 `~/Library/Logs/leetsay` (Finder › Go › Go to Folder…), and remove leetsay
 from System Settings › Privacy & Security › Accessibility and Microphone.
 

@@ -8599,7 +8599,7 @@ class _TabScroll(QtWidgets.QScrollArea):
 class SettingsWindow(QtWidgets.QDialog):
     """Every option in one place. Changes apply straight away and are saved."""
 
-    TABS = ("General", "Typing", "Pop-up", "Look", "Audio", "Model", "Privacy", "Beta")
+    TABS = ("General", "Typing", "Pop-up", "Look", "Audio", "Privacy", "Beta")
     _last_tab = 0                   # remembered while the app runs (not saved)
 
     def __init__(self, dictation):
@@ -9386,8 +9386,9 @@ class SettingsWindow(QtWidgets.QDialog):
         self._refresh_own_rows()
         end_tab()
 
-        # ================= Model =================
-        tab("Model")
+        # ================= Privacy =================
+        tab("Privacy")
+        part("Model")
         heading("Speech model", first=True)
         self.model = QtWidgets.QComboBox()
         for name, label, _quant, _size in MODELS:
@@ -9410,10 +9411,6 @@ class SettingsWindow(QtWidgets.QDialog):
                                "fingerprints (SHA-256). Removing frees about 660 MB; it can "
                                "be downloaded again later.")
         self._show_model()
-        end_tab()
-
-        # ================= Privacy =================
-        tab("Privacy")
         part("Updates & data")
         heading("Updates", first=True)
         self.app_updates = check(
@@ -9495,6 +9492,7 @@ class SettingsWindow(QtWidgets.QDialog):
 
         # ================= Beta (last, as Windows) =================
         tab("Beta")
+        heading("Beta", first=True)
         note("Features still being tested. They may change, and may not work the same in "
              "every program. Each is off until you switch it on.")
         check("Glow round the text box", DICTATION_MARK == "frame",
@@ -10894,7 +10892,8 @@ def main():
                     f"{APP_TITLE}: no speech model yet",
                     f"You can look around and change settings, but dictation won't work "
                     f"until the model's files are in place. {APP_TITLE} looks for them each "
-                    f"time it starts; you can also download the model later from Settings.",
+                    f"time it starts; you can also download the model later from Settings › "
+                    f"Privacy › Model.",
                     buttons=("Continue without it", f"Quit {APP_TITLE}"),
                     headline="Continue without the speech model?") != "Continue without it":
                 leave_now(0)
