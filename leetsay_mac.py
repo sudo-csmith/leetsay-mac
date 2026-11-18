@@ -1693,6 +1693,13 @@ def _ax_frame(element):
                 CFRelease(value)
 
 
+def start_box_rect():
+    """The focused text box's own place (left, top, right, bottom), or None:
+    to tell the box a dictation started in from another one."""
+    found = focused_box_rect()
+    return found[0] if found else None
+
+
 def focused_box_rect(whole_card=False):
     """Where the focused text box is: ((left, top, right, bottom), its window's
     rectangle), in points, or None. Only the place is asked, never the text.
@@ -3795,6 +3802,7 @@ class Overlay(QtWidgets.QWidget):
     CARD_EDGE_GAP = 24             # a dictation card's room from the screen's edges
     TASKBAR_GAP = 18               # ... and from the taskbar
     NO_BOX = "No text box selected"
+    MOVED_BOX = "Go back to your text box to type there"
     CANT_HEAR = "Can't hear you. Check the mic"
     NO_MIC = "Microphone not detected  \u00b7  click for help"
 
@@ -5568,6 +5576,8 @@ class Dictation(QObject):
         self.point_timer = QTimer(self)          # Beta: pointing at a text box
         self.point_timer.setInterval(150)
         self.point_timer.timeout.connect(self._point_to_type)
+        self.start_rect = None                 # where the box you started in is
+        self.last_moved = False                # the last check found another box
         self._box_busy = False
         self._typing_busy = False                # words being typed (for "Typing..." at the pointer)
         self.typed_quiet_until = 0.0
@@ -6367,6 +6377,21 @@ class Dictation(QObject):
         self.frame_card = (DICTATION_MARK == "frame"
                            and app_bundle_id(self.target_pid) in self.WHOLE_CARD_APPS)
         self._typing_busy = False
+        self.start_rect = None
+        if TEXTBOX_ONLY:
+            # The words go only into the box you started in: in a browser or
+            # VS Code every box is in one window, and the last words (read a
+            # moment after you let go) went into a box clicked meanwhile.
+            session = self.live_session
+
+            def note_start():
+                try:
+                    rect = start_box_rect() if focused_text_box() == "yes" else None
+                except Exception:
+                    rect = None
+                if session == self.live_session:
+                    self.start_rect = rect
+            threading.Thread(target=note_start, daemon=True).start()
         if TEXTBOX_ONLY or self.lt_active or POINTER_STATUS or POINTER_HINT:
             # The text box, the microphone and "Listening" at the pointer.
             self.box_timer.setInterval(250 if self.lt_active else 400)
@@ -6380,6 +6405,31 @@ class Dictation(QObject):
         self.live_timer.setInterval(120 if self.lt_active else LIVE_EVERY_MS)
         if (LIVE_PREVIEW and SHOW_POPUP) or self.lt_active:
             self.live_timer.start()
+
+    def _box_moved(self, rect):
+        """Is this text box another one than the box the dictation started in
+        (same window, other place)? A box that grows a line keeps its sides and
+        its top or bottom, so it still counts as the same (as Windows)."""
+        start = self.start_rect
+        if not start or not rect:
+            return False
+        near = lambda a, b: abs(a - b) <= 10
+        return not (near(rect[0], start[0]) and near(rect[2], start[2])
+                    and (near(rect[1], start[1]) or near(rect[3], start[3])))
+
+    def _box_now(self):
+        """The text box question answered now, at the end: "yes", "no",
+        "password" or "unknown"; "no" too when it is another text box than the
+        one you started in (self.last_moved says so)."""
+        self.last_moved = False
+        state = focused_text_box()
+        if state == "yes" and self.start_rect:
+            try:
+                if self._box_moved(start_box_rect()):
+                    self.last_moved, state = True, "no"
+            except Exception:
+                pass
+        return state
 
     def _check_box(self):
         """While dictating: say in time if the words would have nowhere to go.
@@ -6400,13 +6450,16 @@ class Dictation(QObject):
         card = self.frame_card
 
         def ask():
-            place = None
+            place, moved = None, False
             try:
                 state = focused_text_box()
+                if state == "yes" and self.start_rect and self._box_moved(start_box_rect()):
+                    state, moved = "no", True    # another box: wait for the first
                 if want_place and state == "yes":
                     place = focused_box_rect(card)       # for the glow round it
             except Exception:
                 state = "unknown"
+            self.last_moved = moved
             self.box_answer.emit(state, place)
         threading.Thread(target=ask, daemon=True).start()
 
@@ -6424,6 +6477,8 @@ class Dictation(QObject):
         self.box_no_count = self.box_no_count + 1 if state == "no" else 0
         if state == "password":
             self.overlay.box_missing = "Password field: nothing will be typed"
+        elif self.box_no_count >= 2 and self.last_moved:
+            self.overlay.box_missing = Overlay.MOVED_BOX     # another box than the first
         else:
             self.overlay.box_missing = self.box_no_count >= 2
         if was and not self.overlay.box_missing and self.lt_active:
@@ -7243,14 +7298,21 @@ class Dictation(QObject):
                     rest + (" " if ADD_SPACE and not after_key else ""), after_key,
                     kept=typed))
                 return
-            state = focused_text_box() if TEXTBOX_ONLY else "unknown"
+            state = self._box_now() if TEXTBOX_ONLY else "unknown"
             if state == "password":
                 self.forget()
                 self.overlay.show_message("Not typed: a password field is selected", ms=3500)
                 return
             if state == "no":
+                moved = self.last_moved
+                log.info("type as you speak: %s at the end; the rest was not typed",
+                         "another text box" if moved else "no text box")
                 self.remember((typed + rest).strip())
-                self.overlay.show_message("No text box, so the rest wasn't typed", ms=2500)
+                if moved:
+                    self.overlay.show_message("You moved to another text box, so the "
+                                              "rest wasn't typed", ms=3000)
+                else:
+                    self.overlay.show_message("No text box, so the rest wasn't typed", ms=2500)
                 return
         out = rest + (" " if ADD_SPACE and not after_key else "")
         if not out and not after_key:
@@ -7368,9 +7430,15 @@ class Dictation(QObject):
                 self.overlay.show_message("Didn't catch that", ms=1400)
             return
         if TEXTBOX_ONLY:
-            state = focused_text_box()       # where the cursor is now
+            state = self._box_now()          # where the cursor is now
             if state == "password":
                 self.overlay.show_message("Not typed: a password field is selected", ms=3500)
+                return
+            if state == "no" and self.last_moved:
+                self.remember(text)      # kept only with "missed text safety"
+                self.overlay.show_message("You moved to another text box, so it wasn't typed",
+                                          ms=3000)
+                log.info("not typed: another text box than the one the dictation started in")
                 return
             if state == "no":
                 self.remember(text)      # kept only with "missed text safety"
