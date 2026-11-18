@@ -274,7 +274,10 @@ MODEL_FILES = ["config.json", "vocab.txt",
                "encoder-model.int8.onnx", "decoder_joint-model.int8.onnx"]
 
 SAMPLE_RATE = 16000
-MIN_HOLD = 0.3          # shorter presses are treated as accidental
+TAP_SECONDS = 0.35      # a press shorter than this counts as a tap (as Windows: with the
+                        # last-word catch, about 0.1 s of sound before the key is let go)
+LAST_WORD_MS = 400      # "Last-word catch": keep listening this long after the key is
+                        # let go, 250-1000 ms (setting last_word_ms; as Windows)
 ACCENT = "#3DDC97"               # Mint, the same as the Windows version
 POPUP_BG = "#16171B"
 
@@ -509,6 +512,9 @@ def apply_config():
     value = _config.get("max_seconds")
     if isinstance(value, int) and not isinstance(value, bool):
         MAX_RECORD_SECONDS = max(30, min(3600, value))
+    value = _config.get("last_word_ms")
+    globals()["LAST_WORD_MS"] = (max(250, min(1000, value)) if isinstance(value, int)
+                                 and not isinstance(value, bool) else 400)
     if isinstance(_config.get("mic"), str):
         globals()["MIC_DEVICE"] = _config["mic"]
     for name, key in (("SCREEN_GLOW", "screen_glow"), ("SCREEN_GLOW_FLOW", "screen_glow_flow"),
@@ -6069,20 +6075,32 @@ class Dictation(QObject):
             self.fx_timer.stop()
 
     def on_release(self):
-        if not self.recording:
+        """You let go (or clicked the card, or tapped to stop): keep listening
+        for the last-word catch, then finish (as Windows _finish_soon). The
+        recording, the live reading and typing as you speak go on meanwhile."""
+        if not self.recording or getattr(self, "_finishing", False):
+            return
+        self._finishing = True
+        session = self.live_session
+        QTimer.singleShot(LAST_WORD_MS, lambda: self._finish(session))
+
+    def _finish(self, session):
+        self._finishing = False
+        if not self.recording or session != self.live_session:
             return
         self._pointer_hint(False)
         self.recording = False
         self.live_timer.stop()
         if not self.lt_active:
             self._stop_preview()         # (type as you speak keeps its own reading)
-        held = time.monotonic() - self.recorder.started
         audio, rate = self.recorder.stop()
         self.box_timer.stop()
         self.lt_pacer.stop()
-        if held >= MIN_HOLD:
+        # A tap, judged as on Windows: less sound than a tap plus the catch.
+        tap = len(audio) < rate * (TAP_SECONDS + (LAST_WORD_MS - 250) / 1000.0)
+        if not tap:
             play_sound("finish")
-        if held < MIN_HOLD:
+        if tap:
             self._lt_end()
             # (A quick tap types the last dictation again only when the key is
             # held to dictate: in press-to-start mode a tap starts one.)
@@ -7283,6 +7301,7 @@ _PORTABLE_CHECKS = {
     "live_lines": _is_int_in(1, 6),
     "card_width": _is_int_in(0, 2000),
     "max_seconds": _is_int_in(30, 3600),
+    "last_word_ms": _is_int_in(250, 1000),
     "screen_glow_strength": _is_int_in(5, 100),
     "screen_glow_size": _is_int_in(20, 200),
     "card_style": lambda v: v in [k for k, _label in CARD_STYLES],
@@ -8371,6 +8390,31 @@ class SettingsWindow(QtWidgets.QDialog):
         row(field("Time limit"), self.limit, None)
         note("A dictation ends by itself after this long: a safety net if the key gets "
              "stuck.")
+
+        # "Last-word catch": how long the microphone keeps listening after the
+        # hotkey is let go, 0.25 to 1 second in twentieths (as Windows).
+        self.catch = QtWidgets.QSlider(Qt.Horizontal)
+        self.catch.setRange(5, 20)
+        self.catch.setValue(int(round(LAST_WORD_MS / 50.0)))
+        self.catch.setFixedWidth(200)
+        self.catch_value = QtWidgets.QLabel("")
+        self.catch_value.setObjectName("info")
+
+        def catch_shown(value):
+            self.catch_value.setText("%.2f s" % (value * 0.05))
+
+        def catch_saved():
+            set_option("LAST_WORD_MS", "last_word_ms", int(self.catch.value() * 50))
+
+        catch_shown(self.catch.value())
+        self.catch.valueChanged.connect(catch_shown)
+        self.catch.sliderReleased.connect(catch_saved)
+        self.catch.valueChanged.connect(       # a click, the arrow keys or the wheel
+            lambda _value: None if self.catch.isSliderDown() else catch_saved())
+        row(field("Last-word catch"), self.catch, self.catch_value, None)
+        note("Keeps listening a moment after you let go, so a word you're still "
+             "finishing isn't cut off. Longer catches more; the text appears that "
+             "much later.")
 
         heading("Sounds")
         check("Play a sound when dictation starts and finishes", SOUNDS,
