@@ -12,7 +12,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if not FROZEN:
     sys.path[:] = [p for p in sys.path if os.path.abspath(p or os.getcwd()) != _HERE]
 
-VERSION = "0.2.3"
+VERSION = "0.2.4"
 APP_TITLE = "leetsay"
 
 
