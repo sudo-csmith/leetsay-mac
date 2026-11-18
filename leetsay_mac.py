@@ -1150,6 +1150,10 @@ def float_everywhere(widget):
         objc(win, "setLevel:", 25, restype=None, argtypes=(c_long,))          # status level
         objc(win, "setCollectionBehavior:", 1 | 16 | 256, restype=None, argtypes=(c_ulong,))
         objc(win, "setHidesOnDeactivate:", False, restype=None, argtypes=(c_bool,))
+        # No shadow from macOS: the pop-up and the glow draw their own soft
+        # edge. (Newer macOS draws a shadow and glass rim round everything a
+        # see-through window shows, the glow too, as a halo; Windows has none.)
+        objc(win, "setHasShadow:", False, restype=None, argtypes=(c_bool,))
     except Exception:
         log.exception("float_everywhere")
 
@@ -6739,7 +6743,9 @@ def restyle_windows():
     """Settings, the setup window and dialogs take a new look at once."""
     for widget in QApplication.topLevelWidgets():
         try:
-            if isinstance(widget, SettingsWindow):
+            if isinstance(widget, SetupWindow):
+                widget.apply_look()
+            elif isinstance(widget, SettingsWindow):
                 widget.setStyleSheet(settings_style())
                 if isinstance(widget, SettingsWindow):
                     widget.leet_bar.setVisible(LEET_MODE)
@@ -9274,14 +9280,7 @@ class SetupWindow(QtWidgets.QDialog):
         key = pretty(HOTKEY)
         self.setWindowTitle(f"Set up {APP_TITLE}")
         self.setWindowFlags(Qt.Window | Qt.WindowTitleHint | Qt.WindowCloseButtonHint)
-        self.setStyleSheet(settings_style() + """
-QFrame#step { border: 1px solid #2A2C33; border-radius: 10px; background: #1B1C21; }
-QFrame#step[done="true"] { border-color: #2F5A47; }
-QLabel#steptitle { color: #FFFFFF; font-size: 14px; font-weight: 600; }
-QLabel#stepbody { color: #C4C6CF; font-size: 13px; }
-QLabel#ok { color: %s; font-size: 12px; font-weight: 600; }
-QLabel#wait { color: #F2B45A; font-size: 12px; }
-""" % ACCENT)
+        self.apply_look()
         outer = QtWidgets.QVBoxLayout(self)
         outer.setContentsMargins(24, 20, 24, 18)
         outer.setSpacing(12)
@@ -9452,6 +9451,29 @@ QLabel#wait { color: #F2B45A; font-size: 12px; }
         self.steps.append(step)
         return step
 
+    def apply_look(self):
+        """Light or dark, as Settings (macOS's own appearance, or the choice
+        in Settings › Look): the window and its step cards always match. (The
+        cards were always dark, so in Light mode they sat on a light window.)"""
+        light = light_menus()
+        accent = QColor(ACCENT)
+        colours = (dict(card="#FFFFFF", edge="#E0E2E7", done=accent_on_light(accent).name(),
+                        title="#111216", body="#4A4E59", ok=accent_on_light(accent).name(),
+                        wait="#B0650C")
+                   if light else
+                   dict(card="#1B1C21", edge="#2A2C33", done="#2F5A47", title="#FFFFFF",
+                        body="#C4C6CF", ok=accent.name(), wait="#F2B45A"))
+        self.setStyleSheet(settings_style() + """
+QFrame#step { border: 1px solid %(edge)s; border-radius: 10px; background: %(card)s; }
+QFrame#step[done="true"] { border-color: %(done)s; }
+QLabel#steptitle { color: %(title)s; font-size: 14px; font-weight: 600; }
+QLabel#stepbody { color: %(body)s; font-size: 13px; }
+QLabel#ok { color: %(ok)s; font-size: 12px; font-weight: 600; }
+QLabel#wait { color: %(wait)s; font-size: 12px; }
+""" % colours)
+        if getattr(self, "steps", None):
+            self.refresh()                       # the badges are drawn in the look too
+
     def _badge(self, step, state):
         """A number in a ring, or a tick in the accent colour when done."""
         ratio = max(1.0, float(self.devicePixelRatioF()))
@@ -9471,11 +9493,16 @@ QLabel#wait { color: #F2B45A; font-size: 12px; }
             p.setPen(pen)
             p.drawPolyline([QPointF(7.5, 13.5), QPointF(11.5, 17.5), QPointF(18.5, 9)])
         else:
-            ring = accent if state == "now" else QColor("#4A4D57")
+            light = light_menus()
+            now = accent_on_light(accent) if light else accent
+            ring = now if state == "now" else QColor("#B5B9C2" if light else "#4A4D57")
             p.setPen(QPen(ring, 1.6))
             p.setBrush(Qt.NoBrush)
             p.drawEllipse(QRectF(1.5, 1.5, 23, 23))
-            p.setPen(QColor("#FFFFFF") if state == "now" else QColor("#7A7D88"))
+            if state == "now":
+                p.setPen(QColor("#111216" if light else "#FFFFFF"))
+            else:
+                p.setPen(QColor("#8A8E99" if light else "#7A7D88"))
             font = QFont()
             font.setPixelSize(12)
             font.setWeight(QFont.DemiBold)
@@ -9631,6 +9658,10 @@ def only_one_copy():
 def main():
     os.makedirs(SUPPORT_DIR, exist_ok=True)
     app = QApplication(sys.argv)
+    try:                                 # Light/Dark switched in macOS: windows follow
+        app.styleHints().colorSchemeChanged.connect(lambda *_: restyle_windows())
+    except Exception:
+        pass
     app.setApplicationName(APP_TITLE)
     app.setQuitOnLastWindowClosed(False)
     app.setWindowIcon(app_icon())
