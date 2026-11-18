@@ -1815,16 +1815,23 @@ class Recorder:
 # ---------------------------------------------------------------------------
 # Icon: four bars, heights 1, 3, 3, 7
 # ---------------------------------------------------------------------------
-def draw_bars(p, x, y, w, h, colour, levels=(1, 3, 3, 7)):
+def draw_bars(p, x, y, w, h, colour, levels=(1, 3, 3, 7), loudness=1.0):
+    """The leetsay mark, drawn as on Windows: bars 7 units wide, 4 apart,
+    1, 3, 3 and 7 times 5.4 units tall, centred on the middle line (a sound
+    wave, not a signal-strength icon), with slightly rounded corners, so the
+    "1" is a short rounded bar. Fills the width w, centred in the box."""
     n = len(levels)
-    gap = w / (n * 3 - 1)
-    bar = gap * 2
+    k = w / (n * 7.0 + (n - 1) * 4.0)
+    bar, gap = 7.0 * k, 4.0 * k
+    unit = min(5.4 * k, h / float(max(levels))) * loudness
+    middle = y + h / 2.0
     p.setPen(Qt.NoPen)
     p.setBrush(colour)
     for i, lv in enumerate(levels):
-        bh = max(bar, h * lv / 7)
-        r = QRectF(x + i * (bar + gap), y + h - bh, bar, bh)
-        p.drawRoundedRect(r, bar / 2, bar / 2)
+        bh = max(1.0, unit * lv)
+        radius = min(3.0 * k, bh / 2.0)
+        p.drawRoundedRect(QRectF(x + i * (bar + gap), middle - bh / 2.0, bar, bh),
+                          radius, radius)
 
 
 def menu_bar_icon(dim=False, levels=None):
@@ -1839,8 +1846,7 @@ def menu_bar_icon(dim=False, levels=None):
     c = QColor(0, 0, 0, 120 if dim else 255)
     if levels:
         loud = max(0.0, min(1.0, max((list(levels) + [0.0])[:2])))
-        h = 16 * (0.45 + 0.55 * loud)
-        draw_bars(p, 1.5, 1 + 16 - h, 15, h, c)
+        draw_bars(p, 1.5, 1, 15, 16, c, loudness=0.45 + 0.55 * loud)
     else:
         draw_bars(p, 1.5, 1, 15, 16, c)
     p.end()
@@ -1868,7 +1874,7 @@ def icon_pixmap(size, mac_grid=False):
                               tile * 0.225 + grow, tile * 0.225 + grow)
     p.setBrush(QColor("#16171B"))
     p.drawRoundedRect(QRectF(m, m, tile, tile), tile * 0.225, tile * 0.225)
-    s = tile * 0.56
+    s = tile * 0.66                    # as wide a share of the tile as on Windows
     draw_bars(p, (size - s) / 2, (size - s) / 2, s, s, QColor(ACCENT))
     p.end()
     return pm
@@ -2133,12 +2139,6 @@ def how_words(key):
     if HOLD_TO_TALK:
         return f"hold {key}, speak, let go"
     return f"press {key}, speak, press it again"
-
-
-def mic_on_words(key):
-    if HOLD_TO_TALK:
-        return f"only while you hold {key}"
-    return f"only between two presses of {key}"
 
 
 class _CGRect(ctypes.Structure):
@@ -5492,8 +5492,9 @@ class Dictation(QObject):
     def explain_mic_permission(self):
         go = dialog(
             "Allow the microphone",
-            f"To hear you, {APP_TITLE} needs the microphone. It is switched on "
-            f"{mic_on_words(self.key_name())}, and the sound is never saved or sent anywhere.\n\n"
+            f"To hear you, {APP_TITLE} needs the microphone. The microphone is on only "
+            f"while you dictate. Audio is used to recognise your words, then discarded. "
+            f"{APP_TITLE} is designed so that it is not saved or sent anywhere.\n\n"
             f"Next, macOS will ask about the microphone. Click “Allow”.",
             buttons=("Continue", "Not now"))
         if go != "Continue":
@@ -9190,7 +9191,7 @@ QLabel#wait { color: #F2B45A; font-size: 12px; }
         title.setObjectName("headline")
         words.addWidget(title)
         sub = QtWidgets.QLabel(f"Three short steps (and one optional). {how_words(key).capitalize()}: your words are "
-                               f"typed where the cursor is. It all happens on this Mac.")
+                               f"typed where the cursor is. Speech is recognised on this Mac.")
         sub.setObjectName("body")
         sub.setWordWrap(True)
         sub.setFixedWidth(440)
@@ -9213,8 +9214,9 @@ QLabel#wait { color: #F2B45A; font-size: 12px; }
         self.mic_button = self._button("Allow the microphone", self._ask_mic)
         self.mic = self._step(
             2, f"Let {APP_TITLE} hear you",
-            f"The microphone is on {mic_on_words(key)}. Nothing is recorded or "
-            f"saved, and nothing is sent anywhere.",
+            f"The microphone is on only while you dictate. Audio is used to recognise "
+            f"your words, then discarded. {APP_TITLE} is designed so that it is not saved "
+            f"or sent anywhere.",
             [self.mic_button],
             f"No question from macOS? Open System Settings › Privacy & Security › "
             f"Microphone: if {APP_TITLE} is listed, switch it off and on again. Otherwise "

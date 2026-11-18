@@ -52,8 +52,9 @@ INFO = {
     "LSApplicationCategoryType": "public.app-category.productivity",
     "NSHighResolutionCapable": True,
     "NSMicrophoneUsageDescription":
-        f"{APP_TITLE} listens only while you hold the dictation key, to type what "
-        f"you say. The sound is never saved or sent anywhere.",
+        f"{APP_TITLE} listens only while you dictate, to type what you say. Audio is "
+        f"used to recognise your words, then discarded; {APP_TITLE} is designed so "
+        f"that it is not saved or sent anywhere.",
 }
 
 SPEC = r'''
