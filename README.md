@@ -1,12 +1,16 @@
 <p align="center">
-  <img src="assets/leetsay-hero-mac.gif" width="100%"
+  <img src="assets/leetsay-hero-mac.webp" width="100%"
   alt="Illustration: hold Right Option, speak, let go, and the words are typed into a text window.">
 </p>
 
 <p align="center">
+  <a href="https://github.com/sudo-csmith/leetsay-mac/releases/latest"><img
+  src="assets/button-download-mac.png" height="64" alt="Download for Mac"></a>
   <a href="https://github.com/sudo-csmith/leetsay"><img
-  src="assets/leetsay-for-windows.png" width="100%"
-  alt="Using Windows? Get leetsay for Windows"></a>
+  src="assets/button-leetsay-for-windows.png" height="64" alt="leetsay for Windows"></a>
+  <br>
+  <sub>Illustration, not a screen recording. The real card follows your
+  accent colour and theme.</sub>
 </p>
 
 Local dictation for the Mac. Hold a key, speak, let go: your words are typed
@@ -89,7 +93,7 @@ Terminal, not to leetsay.
   before the rest of the sentence is heard.
 
   <p align="center">
-    <img src="assets/leetsay-type-as-you-speak-mac.gif" width="100%"
+    <img src="assets/leetsay-type-as-you-speak-mac.webp" width="100%"
     alt="Illustration of typing as you speak: words appear in a text window while the dictation card shows them.">
   </p>
   <p align="center"><sub>Type as you speak is an optional setting and is off by default. Illustration, not a screen recording.</sub></p>
