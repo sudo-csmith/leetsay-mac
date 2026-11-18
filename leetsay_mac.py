@@ -297,7 +297,8 @@ REMOVE_FILLERS = True                # leave out "um", "uh" and the like
 TEXTBOX_ONLY = True                  # type only into a text box (asks macOS)
 MAX_RECORD_SECONDS = 300             # a recording always stops after this long
 MIC_DEVICE = ""                      # microphone by name; "" = the Mac's default
-SCREEN_GLOW = True                   # also glow round the edge of the whole screen
+SCREEN_GLOW = False                  # also glow round the edge of the whole screen
+                                     # (Mac: off by default; the pill is enough)
 SCREEN_GLOW_STRENGTH = 60            # how bright that glow is, 5-100
 SCREEN_GLOW_SIZE = 56                # how far it reaches in from the edge, 20-200 pixels
 SCREEN_GLOW_FLOW = True              # a light moves along it, and it ripples with your voice
@@ -9295,7 +9296,7 @@ class SetupWindow(QtWidgets.QDialog):
         title = QtWidgets.QLabel(f"Set up {APP_TITLE}")
         title.setObjectName("headline")
         words.addWidget(title)
-        sub = QtWidgets.QLabel(f"Three short steps (and one optional). {how_words(key).capitalize()}: your words are "
+        sub = QtWidgets.QLabel(f"Three short steps. {how_words(key)[:1].upper() + how_words(key)[1:]}: your words are "
                                f"typed where the cursor is. Speech is recognised on this Mac.")
         sub.setObjectName("body")
         sub.setWordWrap(True)
@@ -9336,35 +9337,11 @@ class SetupWindow(QtWidgets.QDialog):
             3, "Try it", f"Click in the box below, then {how_words(key)}.",
             [self.box], None)
 
-        # 4: optional, as in the Windows introduction: a colour, and start at login.
-        self.colour_buttons = []
-        widgets = []
-        for label, value in ACCENT_CHOICES:
-            swatch = QtWidgets.QPushButton()
-            swatch.setToolTip(label)
-            swatch.setFixedSize(30, 30)
-            swatch.setFlat(True)
-            swatch.setStyleSheet("background: transparent; border: none; padding: 0; "
-                                 "min-height: 0;")
-            swatch.clicked.connect(lambda _c=False, v=value: self._colour_chosen(v))
-            self.colour_buttons.append((swatch, value))
-            widgets.append(swatch)
-        self.login = QtWidgets.QCheckBox("Start at login")
-        # First setup: ticked to begin with (as Windows' "Start with Windows"),
-        # and only applied when setup is finished, so quitting here adds
-        # nothing to Login Items. Later visits show and change the real state.
+        # Start at login is switched on when setup is finished (as Windows'
+        # "Start with Windows", ticked in its introduction); the accent colour
+        # and Start at login can be changed in Settings. Quitting during setup
+        # adds nothing to Login Items.
         self.first_setup = not _config.get("welcomed")
-        self.login.setChecked(bool(_config.get("setup_login", True)) if self.first_setup
-                              else starts_at_login())
-        self.login.setEnabled(FROZEN)
-        self.login.toggled.connect(self._login_toggled)
-        widgets.append(self.login)
-        self.extras = self._step(
-            4, "Make it yours (optional)",
-            "Pick a colour for the pop-up, and choose whether leetsay starts quietly in "
-            "the menu bar when you log in. Both can be changed later in Settings.",
-            widgets, None)
-        self._paint_colours()
 
         bottom = QtWidgets.QHBoxLayout()
         self.footnote = QtWidgets.QLabel("")
@@ -9382,27 +9359,6 @@ class SetupWindow(QtWidgets.QDialog):
         self.timer.timeout.connect(self.refresh)
         self.timer.start()
         self.refresh()
-
-    def _paint_colours(self):
-        ratio = self.devicePixelRatioF() or 2.0
-        for swatch, value in self.colour_buttons:
-            swatch.setIcon(QIcon(swatch_picture(value, value.lower() == ACCENT.lower(),
-                                                ratio)))
-            swatch.setIconSize(QtCore.QSize(24, 24))
-
-    def _colour_chosen(self, colour):
-        set_option("ACCENT", "accent", colour)
-        self._paint_colours()
-        self.dictation.overlay.update()          # the pill shows it at once
-
-    def _login_toggled(self, on):
-        if self.first_setup:
-            save_setting("setup_login", bool(on))   # applied when setup is done
-            return
-        if not set_start_at_login(bool(on)):
-            self.login.blockSignals(True)
-            self.login.setChecked(starts_at_login())
-            self.login.blockSignals(False)
 
     # -- building -----------------------------------------------------------
     def _button(self, text, handler):
@@ -9562,7 +9518,6 @@ QLabel#wait { color: %(wait)s; font-size: 12px; }
             self.mic["status"].setText("")
         ready = typing and mic and d.model is not None
         self._badge(self.trial, "done" if tried else ("now" if ready else "later"))
-        self._badge(self.extras, "now" if tried else "later")
         self.box.setEnabled(typing and mic)
         self.trial["status"].setObjectName("ok" if tried else "wait")
         self.trial["status"].setText("It works!" if tried else
@@ -9629,8 +9584,8 @@ QLabel#wait { color: %(wait)s; font-size: 12px; }
             log.info("setup closed before typing was allowed: quit")
             self.dictation.quit()
             return
-        if self.first_setup and FROZEN and self.login.isChecked() != starts_at_login():
-            set_start_at_login(self.login.isChecked())
+        if self.first_setup and FROZEN and not starts_at_login():
+            set_start_at_login(True)             # change it any time in Settings › General
         save_setting("welcomed", True)
         super().done(result)
 

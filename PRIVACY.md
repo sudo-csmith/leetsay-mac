@@ -104,10 +104,9 @@ except the items marked below, and only when you choose them.
 - macOS's **Reduce motion** setting (with it on, the pop-up doesn't animate).
 - The list of trusted website certificates built into macOS, only while a
   download you agreed to is running, to check that it really is github.com.
-- **Start at login** adds leetsay to your Login Items. It is ticked in the
-  setup window (as "Start with Windows" is on Windows) and applied only when
-  you finish setup; untick it there, or later in Settings › General, and it
-  is removed. **Setup and permissions** open pages of System Settings; the
+- **Start at login** adds leetsay to your Login Items. It is switched on when
+  you finish setup (as "Start with Windows" is ticked on Windows), never
+  before; untick it in Settings › General and it is removed. **Setup and permissions** open pages of System Settings; the
   permissions themselves are switched on or off by you, in System Settings.
 - **Also only when you use them:** **Paste using the clipboard** borrows the
   clipboard for about a second and then puts back what was there; **Stay in

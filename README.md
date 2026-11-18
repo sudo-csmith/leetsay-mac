@@ -52,12 +52,12 @@ More in [PRIVACY.md](PRIVACY.md).
 2. Open it and drag **leetsay** into **Applications**, then open it from there.
    macOS asks once whether to open an app from the internet: click **Open**.
 3. After a short **Before you start** note (hold the button to confirm) and
-   the model download, **Set up leetsay** has three short steps and one
-   optional: **Let leetsay type for you** (click **Open Accessibility
-   settings** and switch leetsay on; macOS calls this "Accessibility"), **Let
-   leetsay hear you** (click **Allow the microphone**, then **Allow**), **Try
-   it**, and **Make it yours (optional)**: a colour, and **Start at login**
-   (ticked; untick it if you'd rather open leetsay yourself).
+   the model download, **Set up leetsay** has three short steps: **Let
+   leetsay type for you** (click **Open Accessibility settings** and switch
+   leetsay on; macOS calls this "Accessibility"), **Let leetsay hear you**
+   (click **Allow the microphone**, then **Allow**), and **Try it**. When
+   setup is finished, leetsay starts at login; change that, the colour and
+   more in Settings.
 
 leetsay is signed and notarised by Apple (see [Code signing](#code-signing)).
 Coming from a 0.0.x test version? Those were unsigned, so macOS asks for the
