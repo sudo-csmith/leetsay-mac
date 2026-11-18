@@ -216,7 +216,7 @@ KEY_WORDS = {
 }
 # A private recording may be used instead (LEETSAY_RECORDINGS): the names
 # looked for there.
-RECORDING_NAMES = {"speech": ("speech.wav",), "short": ("leetsay.wav", "short.wav")}
+RECORDING_NAMES = {"speech": ("long.wav",), "short": ("short.wav",)}
 RATE = 16000
 GAP_SECONDS = 0.9
 

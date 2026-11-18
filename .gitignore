@@ -1,3 +1,26 @@
+# Never uploaded: private notes and handoff files, logs, recordings,
+# local settings, signing files.
+CLAUDE*.md
+*HANDOFF*
+*handoff*
+START-HERE*
+NOTES*
+*.notes.md
+*.log
+*.wav
+*.aiff
+*.m4a
+*.mp3
+settings.json
+settings.json.*
+.claude/
+.push-guard.local
+*.p12
+*.p8
+*.cer
+*.certSigningRequest
+tests-private/
+windows-reference/
 # Large or local-only
 models/
 .venv/

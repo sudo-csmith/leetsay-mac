@@ -18,6 +18,14 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # the whole history, for the personal-details check
+
+      # Refuses home folder paths, notes and handoff files, recordings, logs,
+      # local settings and signing files anywhere in the history (the general
+      # rules of tools/push_guard.py; the private word list stays offline).
+      - name: Check for personal details
+        run: python3 tools/push_guard.py --all
 
       # The official Python from python.org, the same one the builds use,
       # checked against its known SHA-256 before it is installed.
@@ -64,3 +72,12 @@ jobs:
         env:
           LEETSAY_MODELS: ~/leetsay-test-models
         run: .venv/bin/python -I tests/run_all.py
+
+      # One-off measurement (numbers only, never fails): numpy's memory with
+      # its default threads and limited to one, on this machine's processor.
+      - name: numpy memory check (measurement only)
+        if: always()
+        continue-on-error: true
+        env:
+          LEETSAY_MODELS: ~/leetsay-test-models
+        run: .venv/bin/python -I tests/bench_numpy_memory.py

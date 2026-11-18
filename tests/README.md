@@ -43,8 +43,8 @@ Recordings are made at test time with macOS's own `say` (the default voice),
 sentence by sentence with pauses between, and converted to 16 kHz with
 `afconvert`, in a temporary folder. Checks look for a few clearly spoken
 words, not the exact text. `LEETSAY_RECORDINGS=/some/folder` uses your own
-recordings instead (`speech.wav`, a longer one with pauses, and `leetsay.wav`
-or `short.wav`, a few seconds); then any recognised text counts.
+recordings instead (`long.wav`, a longer one with pauses, and `short.wav`, a
+few seconds); then any recognised text counts.
 Never add recordings to the repository.
 
 ## Pictures
