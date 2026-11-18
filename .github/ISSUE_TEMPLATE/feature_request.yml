@@ -1,0 +1,21 @@
+name: Idea or request
+description: Suggest something leetsay could do
+title: "[Idea] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        leetsay is built to stay small, local and private. Ideas that need an account, a cloud service or tracking will not be added.
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like leetsay to do?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: What would that help you with?
+    validations:
+      required: false

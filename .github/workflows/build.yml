@@ -1,0 +1,204 @@
+# Builds leetsay for Mac on GitHub's own Macs: one Intel, one Apple Silicon
+# (onnxruntime has no single build for both, so each is built on its own kind
+# of Mac). Each build makes a .dmg and its SHA-256 fingerprint.
+#
+# - Started by hand (Actions tab, "Run workflow"): a test build; the .dmg
+#   files are kept as downloads on the run's page, nothing is released.
+# - A tag v<VERSION> (the same as VERSION in leetsay_mac.py): both builds,
+#   then a DRAFT release with both .dmg files and SHA256SUMS.txt, to be
+#   looked over and published by hand.
+#
+# Signing: when the repository has these secrets (Settings › Secrets and
+# variables › Actions), the app and the .dmg are signed with the developer's
+# Developer ID certificate, notarized by Apple and stapled. Without them the
+# build is unsigned (ad-hoc), as before.
+#   MACOS_CERT_P12        the Developer ID Application certificate + key,
+#                         exported as .p12, then base64 (one line)
+#   MACOS_CERT_PASSWORD   the password chosen when exporting the .p12
+#   NOTARY_KEY_P8         the App Store Connect API key file (.p8), as text
+#   NOTARY_KEY_ID         that key's Key ID
+#   NOTARY_ISSUER_ID      the Issuer ID shown above the keys list
+name: Build
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            arch: intel
+          - runner: macos-15
+            arch: apple-silicon
+    runs-on: ${{ matrix.runner }}
+    # A safety limit: a normal build takes under 30 minutes (Apple's check
+    # has its own 30-minute limit inside); never let a stuck one run on.
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+
+      # The official Python from python.org, the same one leetsay is tested
+      # with, checked against its known SHA-256 before it is installed.
+      - name: Install Python 3.13.0 (python.org, checked)
+        run: |
+          curl -fsSL -o python.pkg https://www.python.org/ftp/python/3.13.0/python-3.13.0-macos11.pkg
+          echo "42b168533eca350427b67a667f006b580dad721de065cc5811dfae0e00ad37ce  python.pkg" | shasum -a 256 -c -
+          sudo installer -pkg python.pkg -target /
+          rm python.pkg
+
+      - name: Install the pinned packages
+        run: |
+          /Library/Frameworks/Python.framework/Versions/3.13/bin/python3.13 -m venv .venv
+          .venv/bin/python -m pip install --disable-pip-version-check -r requirements-build-mac.txt
+
+      - name: Check the tag matches VERSION
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION=$(sed -n 's/^VERSION = "\(.*\)"$/\1/p' leetsay_mac.py)
+          if [ "v$VERSION" != "${GITHUB_REF_NAME}" ]; then
+            echo "The tag ${GITHUB_REF_NAME} does not match VERSION $VERSION in leetsay_mac.py"
+            exit 1
+          fi
+
+      # A keychain made only for this run, deleted at the end. The identity is
+      # passed on by its fingerprint, so the log never shows a name.
+      - name: Load the signing certificate (only when the secrets are set)
+        env:
+          CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          if [ -z "$CERT_P12" ]; then
+            echo "No signing secrets: this build is unsigned (ad-hoc)."
+            exit 0
+          fi
+          KC="$RUNNER_TEMP/signing.keychain-db"
+          KCPASS=$(openssl rand -hex 24)
+          security create-keychain -p "$KCPASS" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KCPASS" "$KC"
+          printf '%s' "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "$CERT_PASSWORD" -T /usr/bin/codesign >/dev/null
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KCPASS" "$KC" >/dev/null
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          ID=$(security find-identity -v -p codesigning "$KC" | grep '"Developer ID Application' | awk '{print $2}' | head -1)
+          if [ -z "$ID" ]; then
+            echo "The MACOS_CERT_P12 secret holds no Developer ID Application certificate."
+            exit 1
+          fi
+          echo "LEETSAY_SIGN_IDENTITY=$ID" >> "$GITHUB_ENV"
+          if [ -n "$NOTARY_KEY_P8" ] && [ -n "$NOTARY_KEY_ID" ] && [ -n "$NOTARY_ISSUER_ID" ]; then
+            printf '%s\n' "$NOTARY_KEY_P8" > "$RUNNER_TEMP/notary.p8"
+            echo "LEETSAY_NOTARY_KEY=$RUNNER_TEMP/notary.p8" >> "$GITHUB_ENV"
+            echo "LEETSAY_NOTARY_KEY_ID=$NOTARY_KEY_ID" >> "$GITHUB_ENV"
+            echo "LEETSAY_NOTARY_ISSUER=$NOTARY_ISSUER_ID" >> "$GITHUB_ENV"
+            echo "Signing and notarizing."
+          else
+            echo "Signing only: the notary secrets are not all set."
+          fi
+
+      - name: Build leetsay.app and the .dmg
+        run: .venv/bin/python -I build_app.py --dmg
+
+      # What a downloader's Mac will do: Gatekeeper must accept both.
+      - name: Check Gatekeeper accepts the app and the .dmg (notarized builds)
+        if: env.LEETSAY_NOTARY_KEY != ''
+        shell: bash
+        run: |
+          spctl --assess --type execute -vv dist/leetsay.app 2>&1 | grep -v "^origin="
+          spctl --assess --type open --context context:primary-signature -vv dist/*.dmg 2>&1 | grep -v "^origin="
+
+      - name: Remove the signing keychain
+        if: always()
+        run: |
+          [ -f "$RUNNER_TEMP/signing.keychain-db" ] && security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/notary.p8"
+
+      - name: Check the processor type
+        run: |
+          WANT=$([ "${{ matrix.arch }}" = "intel" ] && echo x86_64 || echo arm64)
+          GOT=$(lipo -archs dist/leetsay.app/Contents/MacOS/leetsay)
+          echo "built for: $GOT (wanted $WANT)"
+          [ "$GOT" = "$WANT" ]
+
+      # A short start without a screen: it must start, and its network block
+      # must pass its own check (nothing is downloaded: no model is there,
+      # and the first window waits for an answer that never comes).
+      - name: Check the app starts with its network block working
+        run: |
+          export HOME="$RUNNER_TEMP/home"
+          mkdir -p "$HOME"
+          QT_QPA_PLATFORM=offscreen dist/leetsay.app/Contents/MacOS/leetsay &
+          PID=$!
+          sleep 20
+          kill $PID || true
+          cat "$HOME/Library/Logs/leetsay/leetsay.log"
+          grep -q "network block check: passed" "$HOME/Library/Logs/leetsay/leetsay.log"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: leetsay-${{ matrix.arch }}
+          path: |
+            dist/*.dmg
+            dist/*.dmg.sha256
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+
+      - name: Fingerprints
+        run: |
+          cd out
+          sha256sum *.dmg > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTARIZED: ${{ secrets.NOTARY_KEY_ID != '' && secrets.MACOS_CERT_P12 != '' }}
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          SUMS=$(cat out/SHA256SUMS.txt)
+          if [ "$NOTARIZED" = "true" ]; then
+            GATEKEEPER="leetsay is signed with an Apple Developer ID and notarized by Apple, so it opens normally. macOS asks once whether to open an app downloaded from the internet: click **Open**."
+          else
+            GATEKEEPER="**\"Apple could not verify leetsay\".** leetsay is not yet signed with an Apple Developer certificate, so macOS shows this the first time. Click **Done**, open **System Settings › Privacy & Security**, scroll down and click **Open Anyway**, then confirm. See the README for details."
+          fi
+          cat > notes.md <<EOF
+          leetsay for Mac $V: local dictation for the Mac.
+
+          Download the **.dmg** for your kind of Mac (Apple menu › About This Mac shows "Intel", or "Apple M1", "M2" and so on), open it and drag **leetsay** into **Applications**. Needs macOS 14 Sonoma or later.
+
+          - **leetsay-mac-apple-silicon.dmg**: Macs with Apple Silicon (M1, M2, M3, M4...)
+          - **leetsay-mac-intel.dmg**: Macs with an Intel processor
+
+          $GATEKEEPER
+
+          **Optional check: the SHA-256 fingerprint.** In Terminal, type \`shasum -a 256 \` (with a space), drag the .dmg onto the window and press Return. The code should match the one below for that file. If it doesn't, don't open it; download it again.
+
+          \`\`\`
+          $SUMS
+          \`\`\`
+          EOF
+          gh release create "${GITHUB_REF_NAME}" out/*.dmg out/SHA256SUMS.txt \
+            --repo "${GITHUB_REPOSITORY}" --draft --title "leetsay for Mac $V" --notes-file notes.md

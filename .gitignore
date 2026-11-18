@@ -1,0 +1,8 @@
+# Large or local-only
+models/
+.venv/
+__pycache__/
+.DS_Store
+# Build output
+build/
+dist/

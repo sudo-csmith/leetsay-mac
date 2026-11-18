@@ -1,0 +1,92 @@
+name: Bug report
+description: Something in leetsay for Mac is not working as it should
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this.
+
+        **Please do not post anything private.** Check any log lines or screenshots before you attach them, and leave out anything you dictated that you would not want public.
+
+        **Security problems do not go here.** See SECURITY.md for how to report those privately.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, and what did leetsay do?
+      placeholder: I held Right Option, spoke a sentence, let go, and nothing was typed.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to make it happen again
+      placeholder: |
+        1. Open Notes
+        2. Hold the hotkey and speak
+        3. ...
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: leetsay version
+      description: Shown in the title of the Settings window.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      description: Apple menu › About This Mac.
+      placeholder: "macOS Sequoia 15.5"
+    validations:
+      required: true
+  - type: dropdown
+    id: chip
+    attributes:
+      label: Kind of Mac
+      description: Apple menu › About This Mac shows "Intel", or "Apple M1", "M2" and so on.
+      options:
+        - Apple Silicon (M1, M2, M3, M4...)
+        - Intel
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install it?
+      options:
+        - Downloaded app (.dmg)
+        - Python script
+    validations:
+      required: true
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: How often does it happen?
+      options:
+        - Every time
+        - Sometimes
+        - Once
+    validations:
+      required: false
+  - type: textarea
+    id: log
+    attributes:
+      label: Log (optional)
+      description: |
+        The log is at `~/Library/Logs/leetsay/leetsay.log` (in Finder: Go › Go to Folder…, paste that). It covers only the current session. It is designed not to contain what you dictated, the names of apps you use, or your user name (your home folder is written as ~). It can show other folder names. Read it and remove anything you want to keep private before pasting.
+      render: text
+    validations:
+      required: false

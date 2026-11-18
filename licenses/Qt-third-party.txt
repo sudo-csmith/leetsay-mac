@@ -1,0 +1,45 @@
+Third-party code inside Qt
+==========================
+
+leetsay uses Qt 6.12 (through PySide6) for its windows: the modules Qt Core,
+Qt GUI and Qt Widgets, with their macOS (Cocoa) platform and image plugins.
+Qt itself
+is used under the GNU Lesser General Public License v3 (see LGPL-3.0.txt and
+README.txt in this folder). Qt contains code from other projects, under their
+own licences. Their full copyright notices and licence texts are in
+Qt-third-party-full.txt in this folder. The full list is also published by the
+Qt Project at
+
+    https://doc.qt.io/qt-6/licenses-used-in-qt.html
+
+(a third-party website that we do not run or control). For the modules
+leetsay uses, these are:
+
+Qt Core: Apache Tika MimeType Definitions (Apache-2.0); BLAKE2 reference
+implementation (CC0-1.0 or Apache-2.0); zlib (Zlib); Easing Equations by
+Robert Penner (BSD-3-Clause); Double-conversion (BSD-3-Clause); MD4, MD5 and
+SHA-1 (public domain); PCRE2 and PCRE2 SLJIT (BSD-3-Clause with the PCRE2
+exception, BSD-2-Clause); SHA-3 Keccak (CC0-1.0) and brg_endian
+(BSD-2-Clause); SHA-384 and SHA-512, RFC 6234 (BSD-3-Clause); SipHash
+(CC0-1.0); TinyCBOR (MIT); Unicode Character Database (Unicode-DFS-2016);
+Unicode CLDR (Unicode-3.0); forkfd (MIT); tl::expected (CC0-1.0).
+
+Qt GUI: Adobe Glyph List For New Fonts (BSD-3-Clause); FreeType 2, including
+its anti-aliasing rasterizer, BDF, PCF and zlib parts (FreeType License; MIT;
+Zlib); HarfBuzz-NG (MIT); libjpeg-turbo (IJG License and BSD-3-Clause);
+libpng (libpng License); MD4C (MIT); D3D12 Memory Allocator and the D3D12
+mipmap generator (MIT); OpenGL and OpenGL ES headers (MIT); Pixman (MIT);
+Smooth Scaling Algorithm (BSD-2-Clause and Imlib2); Vulkan API Registry
+(Apache-2.0 or MIT) and Vulkan Memory Allocator (MIT); WebGradients (MIT);
+Wintab API (LCS-Telegraphics License); sRGB colour profile (International
+Color Consortium License); DejaVu Fonts (Bitstream Vera Font License); Emoji
+Segmenter (Apache-2.0).
+
+As the FreeType License asks: Portions of this software are copyright (c) The
+FreeType Project (www.freetype.org). All rights reserved.
+
+This software is based in part on the work of the Independent JPEG Group.
+
+On the Mac, the list above is kept as Qt publishes it for these modules: a
+few entries (such as the D3D12 and Wintab parts) belong to other systems
+and are listed to be complete.
