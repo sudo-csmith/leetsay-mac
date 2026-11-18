@@ -8532,6 +8532,58 @@ def open_feedback_page(parent, kind):
 # ---------------------------------------------------------------------------
 # Settings window
 # ---------------------------------------------------------------------------
+class SubTabPill(QtWidgets.QPushButton):
+    """A part's pill at the top of a Settings page (Text / Where your words
+    go), drawn by hand so its round ends are smooth: a style-sheet border is
+    not anti-aliased and its curves looked pixelated, most of all in the
+    accent colour of the one chosen. (Copied from Windows.)"""
+
+    def __init__(self, title):
+        super().__init__(title.replace("&", "&&"))    # "&" shown, not a shortcut mark
+        self._title = title
+        self.setCheckable(True)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setAttribute(Qt.WA_Hover)
+        self.setAutoDefault(False)
+        self.setFixedHeight(28)
+        self.setMinimumWidth(self.fontMetrics().horizontalAdvance(title) + 28)
+
+    def sizeHint(self):
+        return QtCore.QSize(self.fontMetrics().horizontalAdvance(self._title) + 28, 28)
+
+    def paintEvent(self, _event):
+        p = QtGui.QPainter(self)
+        p.setRenderHint(QtGui.QPainter.Antialiasing)
+        hover = self.underMouse()
+        chosen = self.isChecked()
+        if light_menus():
+            edge = (QtGui.QColor(accent_on_light(QtGui.QColor(ACCENT))) if chosen
+                    else QtGui.QColor("#A9AEB8" if hover else "#CDD1D9"))
+            words = QtGui.QColor("#111216" if chosen else ("#1B1D22" if hover else "#5A5E69"))
+        else:
+            edge = (QtGui.QColor(ACCENT) if chosen
+                    else QtGui.QColor("#4A4D57" if hover else "#34363E"))
+            words = QtGui.QColor("#FFFFFF" if chosen else ("#E6E7EC" if hover else "#9A9CA6"))
+        # A filled band for the edge, and a faint tint inside the chosen one:
+        # a thin line alone showed its steps round the curved ends.
+        outer = QtCore.QRectF(self.rect())
+        band = 1.2 if chosen else 1.0
+        inner = outer.adjusted(band, band, -band, -band)
+        shape = QtGui.QPainterPath()
+        shape.addRoundedRect(outer, outer.height() / 2.0, outer.height() / 2.0)
+        hole = QtGui.QPainterPath()
+        hole.addRoundedRect(inner, inner.height() / 2.0, inner.height() / 2.0)
+        if chosen or hover:
+            tint = QtGui.QColor(edge)
+            tint.setAlphaF((0.10 if light_menus() else 0.14) if chosen else 0.06)
+            p.fillPath(shape, tint)
+        p.fillPath(shape.subtracted(hole), edge)
+        p.setPen(words)
+        p.setFont(self.font())
+        p.drawText(self.rect(), Qt.AlignCenter, self._title)
+        p.end()
+
+
 class _TabScroll(QtWidgets.QScrollArea):
     """A tab that scrolls up and down if it must, always exactly as wide as
     the window shows."""
@@ -8547,7 +8599,7 @@ class _TabScroll(QtWidgets.QScrollArea):
 class SettingsWindow(QtWidgets.QDialog):
     """Every option in one place. Changes apply straight away and are saved."""
 
-    TABS = ("General", "Typing", "Pop-up", "Pill", "Look", "Audio", "Model", "Privacy", "Beta")
+    TABS = ("General", "Typing", "Pop-up", "Look", "Audio", "Model", "Privacy", "Beta")
     _last_tab = 0                   # remembered while the app runs (not saved)
 
     def __init__(self, dictation):
@@ -8599,6 +8651,7 @@ class SettingsWindow(QtWidgets.QDialog):
         self._tabs = tabs
         self._sidebar = sidebar
         page = {"layout": None}
+        self._parts = []                         # every page's parts (see part())
         self._relay = _Relay()
         self._relay.done.connect(self._helper_done)
 
@@ -8621,10 +8674,64 @@ class SettingsWindow(QtWidgets.QDialog):
             item.setSizeHint(QtCore.QSize(140, 32))
             sidebar.addItem(item)
             sidebar.setFixedHeight(32 * sidebar.count() + 8)
-            page["layout"] = layout
+            page["layout"] = page["root"] = layout
+            page["holder"] = holder
+            page["sub"] = None
 
         def end_tab():
-            page["layout"].addStretch(1)
+            sub = page.get("sub")
+            if sub is not None:
+                sub["bar"].addStretch(1)
+                for made in sub["layouts"]:
+                    made.addStretch(1)
+                sub["switch"](0)
+                page["sub"] = None
+            page["root"].addStretch(1)
+
+        def part(title):
+            """A part of the page being filled: a row of pills at its top, one
+            part showing at a time, so a long page is never taller than
+            General (as Windows)."""
+            sub = page.get("sub")
+            if sub is None:
+                bar = QtWidgets.QHBoxLayout()
+                bar.setSpacing(6)
+                page["root"].addLayout(bar)
+                # The parts sit in an ordinary box and the ones not showing are
+                # hidden: only the part showing counts for the height.
+                box = QtWidgets.QWidget()
+                stack = QtWidgets.QVBoxLayout(box)
+                stack.setContentsMargins(0, 0, 0, 0)
+                stack.setSpacing(0)
+                page["root"].addWidget(box)
+                group = QtWidgets.QButtonGroup(box)
+                group.setExclusive(True)
+                pages = []
+
+                def switch(index, pages=pages, group=group):
+                    for k, made_page in enumerate(pages):
+                        made_page.setVisible(k == index)
+                    if group.button(index) is not None:
+                        group.button(index).setChecked(True)
+                    QTimer.singleShot(0, self._fit_height)
+
+                group.idClicked.connect(switch)
+                sub = page["sub"] = {"bar": bar, "stack": stack, "group": group,
+                                     "layouts": [], "pages": pages, "switch": switch}
+                self._parts.append(sub)
+            pill = SubTabPill(title)
+            pill.setObjectName("subtab")
+            index = len(sub["layouts"])
+            sub["group"].addButton(pill, index)
+            sub["bar"].addWidget(pill)
+            holder_page = QtWidgets.QWidget()
+            made = QtWidgets.QVBoxLayout(holder_page)
+            made.setContentsMargins(0, 4, 0, 0)
+            made.setSpacing(10)
+            sub["stack"].addWidget(holder_page)
+            sub["pages"].append(holder_page)
+            sub["layouts"].append(made)
+            page["layout"] = made
 
         def row(*widgets):
             line = QtWidgets.QHBoxLayout()
@@ -8658,7 +8765,7 @@ class SettingsWindow(QtWidgets.QDialog):
             return label
 
         def heading(text, first=False):
-            if not first:
+            if not first and page["layout"].count() > 0:   # a line between sections
                 rule = QtWidgets.QFrame()
                 rule.setObjectName("rule")
                 rule.setFixedHeight(1)
@@ -8831,21 +8938,46 @@ class SettingsWindow(QtWidgets.QDialog):
 
         # ================= Typing =================
         tab("Typing")
-        heading("Text", first=True)
+        part("Text")
         check("Type as you speak", LIVE_TYPE, option("LIVE_TYPE", "live_type"),
               tip="Off by default. Your words are typed into your app while you "
                   "speak, about half a second behind you, instead of all at once "
-                  "when you finish. The key can stay held: it doesn't get in the "
+                  "when you finish. The hotkey can stay held: it doesn't get in the "
                   "way of the typing.\n\n"
                   "Words only go into the app you started in, and only into a "
-                  "text box (see below). Otherwise typing waits; if you click into "
+                  "text box. Otherwise typing waits; if you click into "
                   "a text box, it catches up.\n\n"
                   "Less accurate: each part is read on its own, before the rest of "
                   "the sentence is heard, and words already typed are never changed "
                   "afterwards. Small words like \"and\" or \"on\" are the most "
                   "often wrong.",
-              hint="Words appear as you say them. Less accurate than all at once "
-                   "(off is recommended).")
+              hint="Words appear as you speak (a little less accurate).")
+        check("Say \"new line\" for a line break", SPOKEN_BREAKS,
+              option("SPOKEN_BREAKS", "spoken_breaks"),
+              tip="On by default. Saying \"new line\" starts a new line, and \"new "
+                  "paragraph\" leaves an empty line between. Typed as Shift+Return, which "
+                  "starts a new line in most chat apps instead of sending. In a terminal it "
+                  "is a space instead (there it would run the command); in Messages too, "
+                  "where Shift+Return can send.",
+              hint="Typed as Shift+Return, not Return.")
+        check("Remove filler words", REMOVE_FILLERS, option("REMOVE_FILLERS", "remove_fillers"),
+              hint="Leaves out um, uh and erm.")
+        check("Add a space after each dictation", ADD_SPACE, option("ADD_SPACE", "add_space"),
+              hint="So dictations don't run together.")
+        replace_button = button("Word replacements…", lambda: replacements_window(self),
+                                width=180)
+        replace_button.setToolTip("Fix words the speech model gets wrong, such as names it "
+                                  "doesn't know: what it writes, and what you want instead.")
+        row(field("Words"), replace_button, None)
+        note("Times are always written with a colon: \"3.47 PM\" becomes \"3:47 PM\".")
+
+        part("Where your words go")
+        check("Stay in the app I started in", RETURN_FOCUS,
+              option("RETURN_FOCUS", "return_focus"),
+              tip="If another app pops up and takes over while you are speaking, "
+                  "your words still go to the app you were in when you pressed "
+                  "the hotkey.",
+              hint="Even if another app pops up while you speak.")
         self.textbox = check(
             "Text box detection", TEXTBOX_ONLY, self._textbox_changed,
             tip="On by default. While you dictate, the pop-up says \"No text box "
@@ -8857,38 +8989,17 @@ class SettingsWindow(QtWidgets.QDialog):
                 "the page or the app. Nothing is kept or written down.\n\nApps that "
                 "don't say are typed into as usual.\n\nOff: macOS isn't asked, and "
                 "words are typed wherever the focus is.",
-            hint="Says when the cursor isn't in a text box, and types nothing then. Asks "
-                 "macOS only what kind of control has the focus.")
+            hint="Says when the cursor isn't in a text box, and types nothing then.")
         check("Show it at the mouse pointer", POINTER_HINT,
               option("POINTER_HINT", "pointer_hint"),
+              tip="A small \"No text box\" tag follows the pointer while the cursor "
+                  "isn't in a text box. Microphone problems show there too, in red.",
               hint="\"No text box\" and microphone problems, by the pointer.")
         check("Show Listening and Typing at the pointer", POINTER_STATUS,
               option("POINTER_STATUS", "pointer_status"),
               tip="While you dictate, the tag by the pointer says \"Listening\", then "
                   "\"Typing\u2026\" until your words are in. Not with typing as you speak.",
               hint="While you dictate.")
-        check("Remove filler words", REMOVE_FILLERS, option("REMOVE_FILLERS", "remove_fillers"),
-              hint="Leaves out um, uh and erm.")
-        check("Say \"new line\" for a line break", SPOKEN_BREAKS,
-              option("SPOKEN_BREAKS", "spoken_breaks"),
-              tip="On by default. Saying \"new line\" starts a new line, and \"new "
-                  "paragraph\" leaves an empty line between. Typed as Shift+Return, which "
-                  "starts a new line in most chat apps instead of sending. In a terminal it "
-                  "is a space instead (there it would run the command); in Messages too, "
-                  "where Shift+Return can send.",
-              hint="Typed as Shift+Return, not Return.")
-        check("Add a space after each dictation", ADD_SPACE, option("ADD_SPACE", "add_space"),
-              hint="So two dictations in a row don't run together.")
-        check("Stay in the app I started in", RETURN_FOCUS,
-              option("RETURN_FOCUS", "return_focus"),
-              hint="If another app pops up and takes over while you are speaking, your "
-                   "words still go to the app you were in when you pressed the key.")
-        replace_button = button("Word replacements…", lambda: replacements_window(self),
-                                width=180)
-        replace_button.setToolTip("Fix words the speech model gets wrong, such as names it "
-                                  "doesn't know: what it writes, and what you want instead.")
-        row(field("Words"), replace_button, None)
-        note("Times are always written with a colon: \"3.47 PM\" becomes \"3:47 PM\".")
         end_tab()
 
         # ================= Pop-up (as on Windows) =================
@@ -8899,7 +9010,7 @@ class SettingsWindow(QtWidgets.QDialog):
             if on:
                 dictation.preview_popup()
 
-        heading("While dictating", first=True)
+        part("While dictating")
         check("Show the pop-up while dictating", SHOW_POPUP, popup_changed,
               hint="Unticked, nothing appears on screen while you dictate. Notices, such "
                    "as a microphone problem, still show.")
@@ -8933,11 +9044,7 @@ class SettingsWindow(QtWidgets.QDialog):
         row(field("Text size"), self.text_size, None)
         note("Reading along while you speak uses the processor: on an older Mac, "
              "turning it off makes the final text arrive a little sooner.")
-        end_tab()
-
-        # ================= Pill (split from Pop-up: the page was too long) ======
-        tab("Pill")
-        heading("Between dictations", first=True)
+        part("Between dictations")
         check("Always show a small status pill on screen", ALWAYS_SHOW,
               option("ALWAYS_SHOW", "always_show", refresh=True),
               tip="Shows a small pill between dictations so you can see the app is "
@@ -8976,14 +9083,11 @@ class SettingsWindow(QtWidgets.QDialog):
             button("Resize", dictation.resize_popup), button("Reset", reset_popup), None)
         note("You can also drag the pop-up's left or right edge while you dictate to make "
              "it wider, so more of your words fit on each line.")
-        heading("Menu bar icon")
-        check("Moves with your voice", TRAY_LIVE, option("TRAY_LIVE", "tray_live"),
-              hint="While you dictate, the bars of the icon at the top of the screen grow "
-                   "and shrink as you speak.")
         end_tab()
 
         # ================= Look (as on Windows) =================
         tab("Look")
+        part("Colours")
         heading("Settings window", first=True)
         self.menu_theme = QtWidgets.QComboBox()
         for label, key in (("Same as macOS", "system"), ("Dark", "dark"), ("Light", "light")):
@@ -9035,7 +9139,7 @@ class SettingsWindow(QtWidgets.QDialog):
 
         self.card_style.currentIndexChanged.connect(card_style_chosen)
         row(field("Style"), self.card_style, None)
-        heading("Glow")
+        part("Glow")
         self.glow = QtWidgets.QComboBox()
         for key, label, _amount in GLOW_LEVELS:
             self.glow.addItem(label, key)
@@ -9053,7 +9157,6 @@ class SettingsWindow(QtWidgets.QDialog):
                                     "are dictating into.")
         row(field("Glow colour"), self.glow_colour, None)
 
-        heading("Screen glow")
         # Where the screen glow goes, or none: one choice (as on Windows).
         self.glow_where = QtWidgets.QComboBox()
         for label, key in (("Off", "off"), ("Bottom (above the Dock)", "bottom"),
@@ -9079,7 +9182,7 @@ class SettingsWindow(QtWidgets.QDialog):
             else:
                 dictation.demo_screen_glow()
         self.glow_where.currentIndexChanged.connect(glow_where_chosen)
-        row(field("Where"), self.glow_where, None)
+        row(field("Screen glow"), self.glow_where, None)
         self.glow_focus = QtWidgets.QComboBox()
         self.glow_focus.addItem("In the middle", "middle")
         self.glow_focus.addItem("In the corners", "corners")
@@ -9163,11 +9266,15 @@ class SettingsWindow(QtWidgets.QDialog):
               option("ACCENT_OUTLINE", "accent_outline", refresh=True, preview=True))
         check("Moving light on the outline", OUTLINE_LIGHT,
               option("OUTLINE_LIGHT", "outline_light", refresh=True, preview=True))
+        heading("Menu bar icon")
+        check("Moves with your voice", TRAY_LIVE, option("TRAY_LIVE", "tray_live"),
+              hint="While you dictate, the bars of the icon at the top of the screen grow "
+                   "and shrink as you speak.")
         end_tab()
 
         # ================= Audio =================
         tab("Audio")
-        heading("Microphone", first=True)
+        part("Microphone")
         self.mic = QtWidgets.QComboBox()
         self.mic.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.mic.setMinimumContentsLength(12)
@@ -9234,7 +9341,7 @@ class SettingsWindow(QtWidgets.QDialog):
              "finishing isn't cut off. Longer catches more; the text appears that "
              "much later.")
 
-        heading("Sounds")
+        part("Sounds")
         check("Play a sound when dictation starts and finishes", SOUNDS,
               lambda on: set_option("SOUNDS", "sounds", bool(on)))
         self.speaker = QtWidgets.QComboBox()
@@ -9307,6 +9414,7 @@ class SettingsWindow(QtWidgets.QDialog):
 
         # ================= Privacy =================
         tab("Privacy")
+        part("Updates & data")
         heading("Updates", first=True)
         self.app_updates = check(
             "Check for %s updates at startup" % APP_TITLE, CHECK_APP_UPDATES,
@@ -9368,12 +9476,7 @@ class SettingsWindow(QtWidgets.QDialog):
         row(field("Type again"), self.paste_key, None)
         note("A quick tap of the dictation key types the kept text again; you can "
              "also give it a key of its own (tapped on its own).")
-        heading("Move settings to another computer")
-        note("Your choices as one line of text, to copy and paste on another computer "
-             "(Mac or PC). Nothing private is included.")
-        button_grid(button("Export settings", lambda: export_settings_window(self)),
-                    button("Import settings", lambda: import_settings_window(self)))
-        heading("Help and information")
+        part("Help")
         network = QtWidgets.QLabel(network_words()[0].upper() + network_words()[1:])
         network.setObjectName("info")
         network.setToolTip(f"{APP_TITLE} blocks its own internet access while it runs.")
@@ -9383,6 +9486,11 @@ class SettingsWindow(QtWidgets.QDialog):
                         QUrl.fromLocalFile(SUPPORT_DIR))),
                     button("Report a problem", lambda: open_feedback_page(self, "bug")),
                     button("Suggest an idea", lambda: open_feedback_page(self, "idea")))
+        heading("Move settings to another computer")
+        note("Your choices as one line of text, to copy and paste on another computer "
+             "(Mac or PC). Nothing private is included.")
+        button_grid(button("Export settings", lambda: export_settings_window(self)),
+                    button("Import settings", lambda: import_settings_window(self)))
         end_tab()
 
         # ================= Beta (last, as Windows) =================
@@ -9422,13 +9530,28 @@ class SettingsWindow(QtWidgets.QDialog):
         QTimer.singleShot(0, self._fit_height)
 
     def _fit_height(self):
-        """One size for every page: as tall as the tallest one (the window
-        changing height on each page didn't look smooth on a Mac).
-        Never taller than the screen: then a page scrolls instead."""
+        """One height for every page: as tall as General, the tallest (no page
+        or part is taller, by design: long pages are split into parts), so
+        nothing moves when you switch pages (as Windows). Never taller than
+        the screen: then a page scrolls instead."""
         try:
             area = self._tabs.currentWidget()
-            content = max(self._tabs.widget(i).widget().sizeHint().height()
-                          for i in range(self._tabs.count()))
+
+            def need_of(tab):
+                # What a page (its part showing) needs, at the window's width.
+                width = tab.maximumViewportSize().width()     # without a scroll bar
+                holder = tab.widget()
+                layout = holder.layout()
+                if layout is not None:
+                    layout.invalidate()
+                    layout.activate()
+                need = (layout.totalHeightForWidth(width)
+                        if layout is not None and layout.hasHeightForWidth() else -1)
+                return max(need, holder.sizeHint().height())
+
+            # General sets the height; the page showing only if it ever needs
+            # more (e.g. the microphone test's extra lines).
+            content = max(need_of(self._tabs.widget(0)), need_of(area))
             around = self.height() - area.viewport().height()
             screen = self.screen() or QGuiApplication.primaryScreen()
             room = screen.availableGeometry()
