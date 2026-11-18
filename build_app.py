@@ -449,7 +449,7 @@ def draw_dmg_background(one, two):
         p.drawText(QRectF(0, 70, W, 20), Qt.AlignCenter,
                    "Then open it from your Applications folder.")
         # The first-open note, on a quiet panel at the bottom.
-        panel = QRectF(48, H - 74, W - 96, 50)
+        panel = QRectF(48, DMG_NOTE_Y, W - 96, 50)
         p.setPen(QPen(QColor("#2A2C33"), 1.0))
         p.setBrush(QColor("#1B1C21"))
         p.drawRoundedRect(panel, 10, 10)
@@ -457,8 +457,9 @@ def draw_dmg_background(one, two):
         p.setFont(font)
         p.setPen(QColor("#8E909A"))
         if os.environ.get("LEETSAY_SIGN_IDENTITY", "-") != "-":
-            note = ("Signed by its developer and checked by Apple. The first time,\n"
-                    "macOS asks whether to open an app from the internet: click Open.")
+            note = ("Signed by its developer and notarised by Apple (an automated check).\n"
+                    "The first time, macOS asks whether to open an app from the internet: "
+                    "click Open.")
         else:
             note = ("The first time you open it, if macOS says it can't verify leetsay:\n"
                     "System Settings \u203a Privacy & Security \u203a Open Anyway.")
@@ -516,7 +517,10 @@ def set_dmg_label_colour(dmg):
 
 DMG_BG = "#16171B"               # leetsay's own dark background
 DMG_ICON_X = 168                 # the app's icon centre (Applications mirrors it)
-DMG_W, DMG_H = 640, 400          # the install window, in points
+DMG_W, DMG_H = 640, 440          # the install window, in points (taller than the
+                                 # drawing: newer macOS has a taller title bar, which
+                                 # cut off the bottom of the note at 400)
+DMG_NOTE_Y = 326                 # top of the note panel (where it was at 400)
 DMG_ICON_Y = 190                 # where the two icons sit (their centres)
 
 
