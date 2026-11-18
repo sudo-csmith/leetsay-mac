@@ -1665,7 +1665,17 @@ def play_sound(name, force=False):
                 _SOUND_CACHE.clear()
                 _SOUND_CACHE[which] = _make_sounds(which)
             data, rate = _SOUND_CACHE[which][name] * SOUND_VOLUME, SOUND_RATE
-        sd.play(data, rate, device=chosen_output())
+        device = chosen_output()
+        # Played alongside: opening the sound output takes about 0.16 s, and
+        # the card should not wait for it.
+        threading.Thread(target=_play_now, args=(data, rate, device), daemon=True).start()
+    except Exception:
+        log.exception("sound")
+
+
+def _play_now(data, rate, device):
+    try:
+        sd.play(data, rate, device=device)
     except Exception:
         log.exception("sound")
 
@@ -1751,6 +1761,7 @@ class Recorder:
         self.level = 0.0
         self.peak = 0.0       # loudest sample in this recording (0 = dead silent)
         last_error = None
+        began = time.monotonic()
         device = chosen_input()
         for rate in (SAMPLE_RATE, None):
             try:
@@ -1773,6 +1784,7 @@ class Recorder:
                     pass
                 continue
             self.stream, self.rate, self.started = stream, rate, time.monotonic()
+            self.open_ms = (self.started - began) * 1000
             return
         raise RuntimeError(f"microphone did not start: {last_error}")
 
@@ -3248,6 +3260,48 @@ class Overlay(QtWidgets.QWidget):
         self.app_name = app_name if SHOW_APP_NAME else ""
         self.app_icon = None
         self.app_colour = None
+        self._load_app_icon(exe_path)
+        self.levels = deque([0.0] * N_DOTS, maxlen=N_DOTS)
+        self.live_text = ""
+        self.live_target = ""
+        self.reveal_credit = 0.0
+        self._clear_words()
+        self.warning = ""
+        self.box_missing = False
+        self.rows = 1.0
+        self._present()
+
+    def warm_up(self):
+        """Draw a recording card once off-screen (fonts, glow, wave), so the
+        first real one is quick. Changes nothing on screen."""
+        keep = (self.mode, self.app_icon, self.app_colour, self.started)
+        try:
+            self.mode, self.started = "recording", time.monotonic()
+            self.levels = deque([0.3] * N_DOTS, maxlen=N_DOTS)
+            ratio = self.devicePixelRatioF()
+            image = QtGui.QImage(int(self.width() * ratio), int(self.height() * ratio),
+                                 QtGui.QImage.Format_ARGB32_Premultiplied)
+            image.setDevicePixelRatio(ratio)
+            image.fill(Qt.transparent)
+            painter = QtGui.QPainter(image)
+            try:
+                self._draw(painter)
+            finally:
+                painter.end()
+        except Exception:
+            log.exception("card warm up")
+        finally:
+            self.mode, self.app_icon, self.app_colour, self.started = keep
+            self.levels = deque([0.0] * N_DOTS, maxlen=N_DOTS)
+
+    def set_app_icon(self, exe_path):
+        """The app's icon (and glow colour) arriving a moment after the card,
+        the first time an app is seen (macOS takes ~0.17 s to hand it over)."""
+        if self.mode == "recording":
+            self._load_app_icon(exe_path)
+            self.update()
+
+    def _load_app_icon(self, exe_path):
         if (SHOW_APP_ICON or GLOW_FROM_APP) and exe_path:
             try:
                 if exe_path == own_bundle_path():
@@ -3273,15 +3327,6 @@ class Overlay(QtWidgets.QWidget):
                         self.app_colour = icon_colour(picture)
             except Exception:
                 self.app_icon = None
-        self.levels = deque([0.0] * N_DOTS, maxlen=N_DOTS)
-        self.live_text = ""
-        self.live_target = ""
-        self.reveal_credit = 0.0
-        self._clear_words()
-        self.warning = ""
-        self.box_missing = False
-        self.rows = 1.0
-        self._present()
 
     NO_SOUND = "No sound from the microphone"
     CARD_EDGE_GAP = 24             # a dictation card's room from the screen's edges
@@ -5313,12 +5358,36 @@ class Dictation(QObject):
         self.downloading = False
         self.overlay.progress = None
         self.update_status()
+        QTimer.singleShot(800, self._warm_up)
         if self.hotkey.port and not self.recording and self.setup_complete():
             self.overlay.show_message(pill_text() if SHOW_HOTKEY_HINT else "Ready",
                                       ms=1500, pulse=True)
             self.maybe_pill_tip()
         elif not self.setup_complete() and not self.recording:
             self.show_setup_notice()
+
+    def _warm_up(self):
+        """Once, after start-up: the things the first key press would
+        otherwise wait for (the sounds, macOS's first answer about the text
+        box, the front app's icon, drawing the card). Nothing is recorded,
+        played or shown."""
+        if self.recording:
+            return
+        t0 = time.perf_counter()
+        try:
+            which = SOUND_SET if SOUND_SET in ("soft", "bright", "click", "low") else "soft"
+            if which not in _SOUND_CACHE:
+                _SOUND_CACHE.clear()
+                _SOUND_CACHE[which] = _make_sounds(which)
+            if TEXTBOX_ONLY or LIVE_TYPE:
+                focused_text_box()
+            name, path = front_app()
+            if path and (SHOW_APP_ICON or GLOW_FROM_APP):
+                mac_app_icon(path)
+            self.overlay.warm_up()
+        except Exception:
+            log.exception("warm up")
+        log.info("ready for the first dictation (%.0f ms)", (time.perf_counter() - t0) * 1000)
 
     def offer_download(self):
         """No model here (none was downloaded): download it, after asking."""
@@ -5702,6 +5771,7 @@ class Dictation(QObject):
             self.notice(Overlay.NO_MIC, ms=4000,
                         action=lambda: open_settings_pane("microphone"))
             return
+        log.info("microphone opened in %.0f ms", getattr(self.recorder, "open_ms", 0))
         self.recording = True
         self.clicked_start = click
         play_sound("start")
@@ -5712,7 +5782,12 @@ class Dictation(QObject):
         if SHOW_POPUP:
             name, path = front_app() if (SHOW_APP_ICON or SHOW_APP_NAME or GLOW_FROM_APP) \
                 else ("", "")
-            self.overlay.show_recording(name, path)
+            if path and path not in _app_icons:
+                # A new app: the card first, its icon a moment later.
+                self.overlay.show_recording(name, "")
+                QTimer.singleShot(30, lambda p=path: self.overlay.set_app_icon(p))
+            else:
+                self.overlay.show_recording(name, path)
             self.overlay.click_started = click
             self.overlay.box_missing = False
         # Typing as you speak needs the model's own 16 kHz (a microphone that
@@ -5724,7 +5799,7 @@ class Dictation(QObject):
         self._start_effects()
         if TEXTBOX_ONLY or self.lt_active:
             self.box_timer.setInterval(250 if self.lt_active else 400)
-            self._check_box()
+            QTimer.singleShot(40, self._check_box)   # after the card is on screen
             self.box_timer.start()
         self.live_timer.setInterval(120 if self.lt_active else LIVE_EVERY_MS)
         if (LIVE_PREVIEW and SHOW_POPUP) or self.lt_active:
@@ -6310,6 +6385,9 @@ class Dictation(QObject):
         found = self.has_speech(audio, rate)
         peak = float(np.max(np.abs(audio))) if audio.size else 0.0
         decision = speech_decision(found, peak, len(audio) / rate)
+        # No words: what the speech check saw (to explain a stray "Yeah").
+        log.info("speech check: %s (voice detector %s, loudest %.3f, %.1fs)", decision,
+                 "heard speech" if found else "heard none", peak, len(audio) / rate)
         if decision != "read":
             log.info("no speech found in %.1fs of audio (%s; checked in %.0f ms)",
                      len(audio) / rate, decision, (time.perf_counter() - t0) * 1000)
