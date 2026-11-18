@@ -7772,16 +7772,39 @@ class Dictation(QObject):
         leave_now(0)
 
 
+def follow_macos_look():
+    """Theme "Same as macOS": the pop-up's background follows macOS's Light or
+    Dark too, as the windows do (a background colour of your own stays).
+    The setting itself is not changed. True if the background changed."""
+    global POPUP_BG
+    if MENU_THEME != "system" or LEET_MODE:
+        return False
+    presets = [value.lower() for _label, value in BACKGROUND_CHOICES]
+    if POPUP_BG.lower() not in presets:
+        return False
+    want = BACKGROUND_CHOICES[1][1] if light_menus() else BACKGROUND_CHOICES[0][1]
+    if want.lower() == POPUP_BG.lower():
+        return False
+    POPUP_BG = want
+    return True
+
+
 def restyle_windows():
-    """Settings, the setup window and dialogs take a new look at once."""
+    """Settings, the setup window and dialogs take a new look at once (and
+    the pop-up, with Theme "Same as macOS")."""
+    follow_macos_look()
     for widget in QApplication.topLevelWidgets():
         try:
+            if isinstance(widget, Overlay):
+                widget.update()
+                continue
             if isinstance(widget, SetupWindow):
                 widget.apply_look()
             elif isinstance(widget, SettingsWindow):
                 widget.setStyleSheet(settings_style())
                 if isinstance(widget, SettingsWindow):
                     widget.leet_bar.setVisible(LEET_MODE)
+                    widget._paint_theme()
                     QTimer.singleShot(0, widget._fit_height)
         except Exception:
             log.exception("restyle")
@@ -9088,18 +9111,6 @@ class SettingsWindow(QtWidgets.QDialog):
         # ================= Look (as on Windows) =================
         tab("Look")
         part("Colours")
-        heading("Settings window", first=True)
-        self.menu_theme = QtWidgets.QComboBox()
-        for label, key in (("Same as macOS", "system"), ("Dark", "dark"), ("Light", "light")):
-            self.menu_theme.addItem(label, key)
-        self.menu_theme.setCurrentIndex(max(0, self.menu_theme.findData(MENU_THEME)))
-
-        def menu_theme_chosen(index):
-            set_option("MENU_THEME", "menu_theme", self.menu_theme.itemData(index))
-            restyle_windows()
-        self.menu_theme.currentIndexChanged.connect(menu_theme_chosen)
-        row(field("Look"), self.menu_theme, None)
-        heading("Colours")
         colour_row = [field("Colour")]
         for label, value in ACCENT_CHOICES:
             swatch = QtWidgets.QPushButton()
@@ -9112,16 +9123,30 @@ class SettingsWindow(QtWidgets.QDialog):
             colour_row.append(swatch)
         row(*(colour_row + [button("Custom", self._accent_custom), None]))
         self._paint_swatches()
-        self.backgrounds = []
-        background_row = [field("Background")]
-        for label, value in BACKGROUND_CHOICES:
+
+        # One "Theme" row for the pop-up and the windows together (as Windows),
+        # with "Same as macOS" (Mac): both follow macOS's Light or Dark. Custom:
+        # the pop-up's own background colour.
+        self.theme_buttons = []
+        theme_row = [field("Theme")]
+        for label, value, menus in (("Dark", BACKGROUND_CHOICES[0][1], "dark"),
+                                    ("Light", BACKGROUND_CHOICES[1][1], "light"),
+                                    ("Same as macOS", None, "system")):
             choice = ChoiceButton(label)
             choice.setAutoDefault(False)
-            choice.clicked.connect(lambda _c=False, v=value: self._background_chosen(v))
-            self.backgrounds.append((choice, value))
-            background_row.append(choice)
-        row(*(background_row + [button("Custom", self._background_custom), None]))
-        self._paint_backgrounds()
+            choice.setToolTip(f"The pop-up and the {APP_TITLE} windows, %s." % (
+                "following macOS's Light or Dark appearance" if menus == "system"
+                else label.lower()))
+            choice.clicked.connect(lambda _c=False, v=value, m=menus: self._theme_chosen(v, m))
+            self.theme_buttons.append((choice, value, menus))
+            theme_row.append(choice)
+        self.theme_custom = ChoiceButton("Custom")
+        self.theme_custom.setAutoDefault(False)
+        self.theme_custom.setToolTip("Your own colour for the pop-up's background.")
+        self.theme_custom.clicked.connect(lambda _c=False: self._background_custom())
+        theme_row.append(self.theme_custom)
+        row(*(theme_row + [None]))
+        self._paint_theme()
         heading("Card")
         self.card_style = QtWidgets.QComboBox()
         for key, label in CARD_STYLES:
@@ -9757,9 +9782,33 @@ class SettingsWindow(QtWidgets.QDialog):
             swatch.setIcon(QIcon(swatch_picture(value, value.lower() == ACCENT.lower(), ratio)))
             swatch.setIconSize(QtCore.QSize(24, 24))
 
+    def _theme_chosen(self, background, menus):
+        """Dark, Light or Same as macOS: the pop-up and the windows together."""
+        set_option("MENU_THEME", "menu_theme", menus)
+        if background is None:                   # Same as macOS: as macOS is now
+            background = (BACKGROUND_CHOICES[1][1] if light_menus()
+                          else BACKGROUND_CHOICES[0][1])
+        self._background_chosen(background)
+        restyle_windows()
+
+    def _paint_theme(self):
+        """Dark / Light / Same as macOS lit when the pop-up and the windows
+        match it; Custom when the pop-up has a colour of its own (or they
+        differ)."""
+        matched = False
+        for button, value, menus in getattr(self, "theme_buttons", []):
+            if value is None:                    # Same as macOS
+                on = MENU_THEME == "system" and POPUP_BG.lower() in [
+                    v.lower() for _l, v in BACKGROUND_CHOICES]
+            else:
+                on = value.lower() == POPUP_BG.lower() and menus == MENU_THEME
+            button.setChosen(on)
+            matched = matched or on
+        if getattr(self, "theme_custom", None) is not None:
+            self.theme_custom.setChosen(not matched)
+
     def _paint_backgrounds(self):
-        for choice, value in self.backgrounds:
-            choice.setChosen(value.lower() == POPUP_BG.lower())
+        self._paint_theme()
 
     def _accent_chosen(self, colour):
         set_option("ACCENT", "accent", colour)
@@ -10851,6 +10900,7 @@ def main():
         app.styleHints().colorSchemeChanged.connect(lambda *_: restyle_windows())
     except Exception:
         pass
+    follow_macos_look()                  # Theme "Same as macOS": the pop-up too
     app.setApplicationName(APP_TITLE)
     app.setQuitOnLastWindowClosed(False)
     app.setWindowIcon(app_icon())
