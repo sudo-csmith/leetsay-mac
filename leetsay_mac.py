@@ -5785,7 +5785,7 @@ class Dictation(QObject):
             if path and path not in _app_icons:
                 # A new app: the card first, its icon a moment later.
                 self.overlay.show_recording(name, "")
-                QTimer.singleShot(30, lambda p=path: self.overlay.set_app_icon(p))
+                QTimer.singleShot(30, lambda: self._app_icon_arrived(path))
             else:
                 self.overlay.show_recording(name, path)
             self.overlay.click_started = click
@@ -5841,6 +5841,15 @@ class Dictation(QObject):
         if not self.recording:
             self.fx_demo_until = time.monotonic() + 3.0
             self._start_effects(demo=True)
+
+    def _app_icon_arrived(self, path):
+        """A new app's icon, a moment after the card: the card shows it, and
+        the screen glow (already started in your accent colour) takes the
+        icon's colour, as it would have if the icon had been there at once."""
+        self.overlay.set_app_icon(path)
+        if (self.recording and SCREEN_GLOW and GLOW_FROM_APP
+                and getattr(self.overlay, "app_colour", None) is not None):
+            self._start_effects()
 
     def _start_effects(self, demo=False):
         """The extras: a glow round the screen, a moving menu bar icon. They
