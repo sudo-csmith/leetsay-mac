@@ -4027,6 +4027,9 @@ class Overlay(QtWidgets.QWidget):
         if there is no room above, and back to its place when box is None."""
         if self._dragging or self._card is None:
             return
+        if box is not None and (self.click_started or self.mode != "recording"):
+            return       # started by clicking the pill (the card stays under the
+            #              mouse), or not a dictation card: the pill never moves
         home = self._top_left(self._home())
         goal = home
         if box is not None:
@@ -4038,9 +4041,10 @@ class Overlay(QtWidgets.QWidget):
                 room = screen.availableGeometry()
                 lift = (box.top() - 12) - card.bottom()           # just above the box
                 drop = (box.bottom() + 12) - card.top()           # ... or just below it
-                if card.top() + lift >= room.top() + 8:
+                far = 240                       # a short step only, never across the screen
+                if card.top() + lift >= room.top() + 8 and -lift <= far:
                     goal = home + QtCore.QPoint(0, lift)
-                elif card.bottom() + drop <= room.bottom() - 8:
+                elif card.bottom() + drop <= room.bottom() - 8 and drop <= far:
                     goal = home + QtCore.QPoint(0, drop)
         if goal == getattr(self, "_avoid_goal", None):
             return
