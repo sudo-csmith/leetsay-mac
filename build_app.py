@@ -28,6 +28,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -356,8 +357,16 @@ def notarize(path):
         if answer.get("id"):
             subprocess.run(["xcrun", "notarytool", "log", answer["id"]] + notary_args())
         sys.exit("Notarization failed: " + (r.stderr.strip() or r.stdout.strip()))
-    subprocess.run(["xcrun", "stapler", "staple", path], check=True)
-    subprocess.run(["xcrun", "stapler", "validate", path], check=True)
+    # Stapling and checking ask Apple's servers; a dropped connection there
+    # ("The network connection was lost", error 68) is tried again.
+    for step in ("staple", "validate"):
+        for attempt in range(3):
+            if subprocess.run(["xcrun", "stapler", step, path]).returncode == 0:
+                break
+            if attempt == 2:
+                sys.exit(f"stapler {step} failed 3 times for {os.path.basename(path)}")
+            print(f"stapler {step}: trying again in 15 s", flush=True)
+            time.sleep(15)
 
 
 def arch_label():
