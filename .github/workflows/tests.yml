@@ -1,0 +1,66 @@
+# Runs leetsay for Mac's off-screen tests (tests/run_all.py) on every push
+# and pull request, on one of GitHub's Apple Silicon Macs. Nothing is
+# built or released. The speech model is kept in GitHub's cache; when it is
+# not there, it is fetched by leetsay's own download code (tests/get_model.py),
+# which checks the SHA-256 of every file against the values in leetsay_mac.py.
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # The official Python from python.org, the same one the builds use,
+      # checked against its known SHA-256 before it is installed.
+      - name: Install Python 3.13.17 (python.org, checked)
+        run: |
+          curl -fsSL -o python.pkg https://www.python.org/ftp/python/3.13.17/python-3.13.17-macos11.pkg
+          echo "3053592af66128269efab37fe7851a4894920b27c442aeec99ce4d34d17c07e3  python.pkg" | shasum -a 256 -c -
+          sudo installer -pkg python.pkg -target /
+          rm python.pkg
+
+      - name: Install the pinned packages
+        run: |
+          /Library/Frameworks/Python.framework/Versions/3.13/bin/python3.13 -m venv .venv
+          .venv/bin/python -m pip install --disable-pip-version-check -r requirements-mac.txt
+
+      # The cache key names the model and speech detector release tags, so a
+      # new model release in leetsay_mac.py fetches the new files once.
+      - name: Speech model cache key
+        id: model
+        run: echo "key=$(.venv/bin/python -I tests/get_model.py --cache-key)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the speech model
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/leetsay-test-models
+          key: ${{ steps.model.outputs.key }}
+
+      # On a cache hit this only checks the files (a few seconds); otherwise
+      # it downloads them (about 660 MB) from this project's model releases.
+      - name: Fetch or check the speech model
+        run: .venv/bin/python -I tests/get_model.py ~/leetsay-test-models
+
+      # Saved straight away (not at the end), so a failing test doesn't
+      # mean fetching the model again on the next push.
+      - name: Keep the speech model in the cache
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/leetsay-test-models
+          key: ${{ steps.model.outputs.key }}
+
+      - name: Run the tests
+        env:
+          LEETSAY_MODELS: ~/leetsay-test-models
+        run: .venv/bin/python -I tests/run_all.py
